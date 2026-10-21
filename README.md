@@ -12,4 +12,6 @@
 
 [算法接入](docs/student-algorithm-guide.md) · [评价约束](docs/evaluation-environment.md) · [冻结数据说明](data/packages/rec-course-v3-train5-1.0.0/README.md) · [发行边界](docs/发行说明-Windows.md)
 
+小组实现记录：[Content 推荐](docs/content-recommendation.md) · [实验二 Popular / Cold Start / ItemCF](docs/experiment2-recommendation.md)。本小组仓库已按提交要求设置为公开，便于教师直接查看代码与每次提交。
+
 发行文件校验：根目录Verify-Package.ps1及PACKAGE-CHECKSUMS.json。完整操作与安全停止条件见详细指南。

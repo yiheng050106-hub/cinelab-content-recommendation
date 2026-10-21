@@ -63,9 +63,21 @@ class AlgorithmNotImplemented(Exception):
 PROVIDERS: dict[Algorithm, Recommender] = {}
 
 from .student.content import ContentProvider
+from .student.popular import PopularProvider
+from .student.cold_start import ColdStartProvider
+from .student.itemcf import ItemCFProvider
 
 PROVIDERS[Algorithm.content] = ContentProvider(
     model_manifest_path=Path("models/business/content-genres-v1/manifest.json")
+)
+PROVIDERS[Algorithm.popular] = PopularProvider(
+    model_manifest_path=Path("models/business/popular-bayes-v1/manifest.json")
+)
+PROVIDERS[Algorithm.cold_start] = ColdStartProvider(
+    model_manifest_path=Path("models/business/cold-popular-v1/manifest.json")
+)
+PROVIDERS[Algorithm.itemcf] = ItemCFProvider(
+    model_manifest_path=Path("models/business/itemcf-cobehavior-v1/manifest.json")
 )
 
 

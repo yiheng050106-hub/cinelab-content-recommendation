@@ -15,6 +15,12 @@ const loading = ref(false), error = ref<unknown>(null), unavailable = ref(false)
 const result = ref<AlgorithmResult | null>(null)
 const films = ref<Record<string, Movie>>({})
 const highestScore = computed(() => Math.max(0, ...result.value?.items.map(item => item.score ?? 0) || []))
+const resultMethod = computed(() => ({
+  popular: '评分数量与平均分', content: '电影类型与历史偏好',
+  itemcf: '相似电影与评分历史', cold_start: '零行为热门回退',
+}[result.value?.algorithm || ''] || '真实评分数据'))
+const resultScope = computed(() => result.value?.algorithm === 'popular' ? 'GLOBAL TOP'
+  : result.value?.algorithm === 'cold_start' ? 'COLD START TOP' : 'PERSONALIZED TOP')
 let run = 0
 onScopeDispose(() => { run++ })
 
@@ -59,8 +65,8 @@ watch(() => props.endpoint, load, { immediate: true })
       </div>
       <div v-else-if="result" class="content-results">
         <div class="result-hero">
-          <div><span class="result-eyebrow">PERSONALIZED TOP {{ result.items.length }}</span><h4>{{ result.algorithm.toUpperCase() }} <span>为 {{ subjectKey || '当前账号' }} 推荐</span></h4></div>
-          <div class="result-meta"><span>模型 {{ result.model_version }}</span><span>基于真实历史偏好 · {{ result.runtime_mode }}</span></div>
+          <div><span class="result-eyebrow">{{ resultScope }} {{ result.items.length }}</span><h4>{{ result.algorithm.toUpperCase() }} <span>为 {{ subjectKey || '当前账号' }} 推荐</span></h4></div>
+          <div class="result-meta"><span>模型 {{ result.model_version }}</span><span>依据：{{ resultMethod }} · {{ result.runtime_mode }}</span></div>
         </div>
         <p v-if="!result.items.length" class="result-empty">当前用户暂无可用的内容偏好或候选电影。</p>
         <ol v-else class="recommendation-grid">
@@ -74,7 +80,7 @@ watch(() => props.endpoint, load, { immediate: true })
             </div>
           </li>
         </ol>
-        <p class="result-footnote">分数用于本次 Content 排序；电影和用户历史均来自课程真实数据。</p>
+        <p class="result-footnote">依据 {{ resultMethod }} 排序；推荐结果由真实数据计算，电影资料来自课程目录。</p>
       </div>
     </StatePanel>
   </section>

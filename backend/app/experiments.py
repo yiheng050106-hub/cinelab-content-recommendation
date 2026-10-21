@@ -28,7 +28,9 @@ def invoke(algorithm: Algorithm, kind: str, uid: int, limit: int):
             "dataset_version": DATASET, "split_version": SPLIT, "runtime_mode": "business",
             "model_version": None, "batch_id": None, "items": []}) from None
     except ContractError as exc:
-        raise APIError(503 if exc.code in {"MODEL_BINDING_INVALID", "DATA_IDENTITY_INVALID", "DATA_MODE_INVALID"} else 500,
+        status = (400 if exc.code in {"COLD_START_REQUIRES_APP", "COLD_START_REQUIRES_ZERO_BEHAVIOR"}
+                  else 503 if exc.code in {"MODEL_BINDING_INVALID", "DATA_IDENTITY_INVALID", "DATA_MODE_INVALID"} else 500)
+        raise APIError(status,
             exc.code, str(exc)) from None
 
 

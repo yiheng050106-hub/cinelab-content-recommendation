@@ -13,6 +13,8 @@ const route = useRoute(), router = useRouter(), auth = useAuth()
 const source = ref('ml'), algorithm = ref('content'), selected = ref(''), typedUserId = ref('')
 const userPage = ref(1), users = useRemote<Page<HistoryUser>>(), ratings = useRemote<Page<Movie>>()
 const ratingPage = ref(1), available = ref<Algorithm[]>([]), registryError = ref<unknown>(null)
+const appActivity = ref<{ ratings: number; favorites: number } | null>(null)
+const appActivityError = ref(false)
 const evaluationError = ref<unknown>(null), evaluationPending = ref(false), evaluationMissing = ref(false)
 const algorithmGroups = computed(() => [
   { label: '核心算法 · 学生实现', items: available.value.filter(a => ['content', 'itemcf', 'als'].includes(a.algorithm)) },
@@ -24,6 +26,33 @@ const endpoint = computed(() => !subject.value ? null : source.value === 'ml'
   : `/me/recommendations/${algorithm.value}`)
 const registered = computed(() => available.value.find(a => a.algorithm === algorithm.value)?.status === 'registered')
 const validTypedUserId = computed(() => /^[1-9][0-9]*$/.test(typedUserId.value.trim()) && Number(typedUserId.value.trim()) <= 5000)
+const algorithmLabels: Record<string, string> = {
+  popular: 'Popular · 热门推荐', content: 'Content · 类型推荐',
+  itemcf: 'ItemCF · 物品协同过滤', cold_start: 'Cold Start · 零行为推荐',
+  als: 'ALS · 矩阵分解',
+}
+const algorithmExplanation = computed(() => ({
+  popular: '根据真实历史评分数量和平均分计算热门榜单。',
+  content: '根据电影类型与该用户的历史偏好计算推荐。',
+  itemcf: '根据共同获得高评分的电影计算相似物品，再结合该用户的评分历史。',
+  cold_start: '针对零评分、零收藏的新账号，回退到真实数据训练的热门榜单。',
+}[algorithm.value] || '选择算法查看实时推荐结果。'))
+
+function selectAlgorithm() {
+  if (algorithm.value === 'cold_start') source.value = 'app'
+  updateUrl()
+}
+async function fetchAppActivity() {
+  appActivity.value = null; appActivityError.value = false
+  if (!auth.account) return
+  try {
+    const [ratings, favorites] = await Promise.all([
+      http.get<Page<Movie>>('/me/ratings', { params: { page: 1, per_page: 1 } }),
+      http.get<Page<Movie>>('/me/favorites', { params: { page: 1, per_page: 1 } }),
+    ])
+    appActivity.value = { ratings: ratings.data.total, favorites: favorites.data.total }
+  } catch { appActivityError.value = true }
+}
 
 function updateUrl() {
   void router.replace({ path: '/experiments', query: {
@@ -68,6 +97,7 @@ watch(() => route.query, () => {
   typedUserId.value = selected.value
 }, { immediate: true })
 watch(() => [selected.value, source.value], () => { ratingPage.value = 1; void fetchRatings() })
+watch(() => auth.account?.account_id, () => { void fetchAppActivity() }, { immediate: true })
 void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatings()
 </script>
 
@@ -76,11 +106,11 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
     <div class="page-heading">
       <p class="eyebrow">RECOMMENDATION LAB</p>
       <h1>推荐实验室<span class="heading-dot">.</span></h1>
-      <p>从真实观影历史出发，观察 Content 如何找到下一部电影。</p>
+      <p>用真实评分数据对比 Content、Popular、Cold Start 与 ItemCF 的 Top-10 推荐。</p>
     </div>
     <div class="lab-notice">
       <span class="status-pill">实时结果</span>
-      <p>Content 使用电影类型和对应用户的历史评分计算推荐。历史用户只读；其他尚未接入的算法保留原状态。</p>
+      <p>{{ algorithmExplanation }} 历史用户只读，推荐列表由当前算法实时生成。</p>
     </div>
     <div class="lab-layout">
       <aside class="lab-controls">
@@ -113,12 +143,17 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
         <div v-else class="current-subject">
           <p>{{ auth.account?.login_name || '请先登录注册账号' }}</p>
           <span>{{ auth.account?.subject_key || '尚未登录' }}</span>
+          <div v-if="appActivity" class="activity-counts">
+            <span>评分 {{ appActivity.ratings }}</span><span>收藏 {{ appActivity.favorites }}</span>
+            <strong v-if="appActivity.ratings === 0 && appActivity.favorites === 0">零评分 · 零收藏</strong>
+          </div>
+          <span v-else-if="appActivityError">行为数量暂不可用</span>
           <RouterLink v-if="!auth.account" to="/login" class="text-link">前往登录 →</RouterLink>
         </div>
         <label for="algorithm-select">推荐算法</label>
-        <el-select id="algorithm-select" v-model="algorithm" @change="updateUrl">
+        <el-select id="algorithm-select" v-model="algorithm" @change="selectAlgorithm">
           <el-option-group v-for="group in algorithmGroups" :key="group.label" :label="group.label">
-            <el-option v-for="a in group.items" :key="a.algorithm" :label="a.algorithm" :value="a.algorithm" />
+            <el-option v-for="a in group.items" :key="a.algorithm" :label="algorithmLabels[a.algorithm] || a.algorithm" :value="a.algorithm" />
           </el-option-group>
         </el-select>
         <StatePanel v-if="registryError" :error="registryError" @retry="fetchRegistry" />
@@ -129,7 +164,7 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
         </div>
       </aside>
       <div class="lab-results">
-        <AlgorithmPanel :label="`${algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
+        <AlgorithmPanel :label="`${algorithmLabels[algorithm] || algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
           :empty-subject="source === 'ml' ? '请选择历史用户' : '登录后体验'" />
         <section v-if="source === 'ml'" class="history-panel">
           <div class="section-top"><h2>历史评分</h2><span class="status-pill">{{ subject || '未选择用户' }} · 只读</span></div>
@@ -162,4 +197,7 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
 .direct-user-input .el-input { min-width: 0; }
 .direct-user-input .el-button { flex: 0 0 auto; }
 .model-info strong { color: var(--accent); }
+.activity-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+.activity-counts span, .activity-counts strong { padding: 4px 8px; border: 1px solid var(--border); border-radius: 12px; font-size: 11px; }
+.activity-counts strong { color: var(--accent); border-color: var(--accent); }
 </style>
