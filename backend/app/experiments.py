@@ -16,10 +16,14 @@ router = APIRouter(tags=["学生算法预留边界"])
 
 class RecommendationQuery(Input):
     limit: int = Field(default=10, ge=1, le=50)
+    genre: str | None = Field(default=None, min_length=2, max_length=32, pattern=r"^[A-Za-z-]+$")
 
 
-def invoke(algorithm: Algorithm, kind: str, uid: int, limit: int):
-    request = RecommendationRequest(kind, uid, limit, "business", DATASET, SPLIT)
+def invoke(algorithm: Algorithm, kind: str, uid: int, limit: int, genre: str | None = None):
+    if genre and algorithm != Algorithm.cold_start:
+        raise APIError(400, "INTEREST_ONLY_FOR_COLD_START", "兴趣类型仅用于冷启动推荐")
+    request = RecommendationRequest(kind, uid, limit, "business", DATASET, SPLIT,
+                                    (genre,) if genre else ())
     try:
         return recommend(algorithm, request)
     except AlgorithmNotImplemented:
@@ -28,7 +32,8 @@ def invoke(algorithm: Algorithm, kind: str, uid: int, limit: int):
             "dataset_version": DATASET, "split_version": SPLIT, "runtime_mode": "business",
             "model_version": None, "batch_id": None, "items": []}) from None
     except ContractError as exc:
-        status = (400 if exc.code in {"COLD_START_REQUIRES_APP", "COLD_START_REQUIRES_ZERO_BEHAVIOR"}
+        status = (400 if exc.code in {"COLD_START_REQUIRES_APP", "COLD_START_REQUIRES_ZERO_BEHAVIOR",
+                                    "COLD_START_INTEREST_INVALID", "REQUEST_CONTEXT_INVALID"}
                   else 503 if exc.code in {"MODEL_BINDING_INVALID", "DATA_IDENTITY_INVALID", "DATA_MODE_INVALID"} else 500)
         raise APIError(status,
             exc.code, str(exc)) from None
@@ -47,7 +52,7 @@ def evaluations():
 
 @router.get("/me/recommendations/{algorithm}", response_model=RecommendationResult)
 def my_recommendations(algorithm: Algorithm, actor: ActorDependency, query: Annotated[RecommendationQuery, Query()]):
-    return invoke(algorithm, "app", actor.account_id, query.limit)
+    return invoke(algorithm, "app", actor.account_id, query.limit, query.genre)
 
 
 @router.get("/demo/history-users/{ml_user_id}/recommendations/{algorithm}", response_model=RecommendationResult)
@@ -57,4 +62,4 @@ def history_recommendations(ml_user_id: IdPath, algorithm: Algorithm, request: R
     with request.app.state.db.connection() as conn:
         if conn.execute(text("SELECT ml_user_id FROM history_users WHERE ml_user_id=:id"), {"id": uid}).first() is None:
             raise APIError(404, "HISTORY_USER_NOT_FOUND", "历史匿名用户不存在")
-    return invoke(algorithm, "ml", uid, query.limit)
+    return invoke(algorithm, "ml", uid, query.limit, query.genre)

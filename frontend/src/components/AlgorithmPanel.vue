@@ -17,7 +17,8 @@ const films = ref<Record<string, Movie>>({})
 const highestScore = computed(() => Math.max(0, ...result.value?.items.map(item => item.score ?? 0) || []))
 const resultMethod = computed(() => ({
   popular: '评分数量与平均分', content: '电影类型与历史偏好',
-  itemcf: '相似电影与评分历史', cold_start: '零行为热门回退',
+  itemcf: '相似电影与评分历史', cold_start: result.value?.items[0]?.recall_sources?.includes('genre_filtered_popular')
+    ? '所选兴趣类型与热门排序' : '零行为热门回退',
 }[result.value?.algorithm || ''] || '真实评分数据'))
 const resultScope = computed(() => result.value?.algorithm === 'popular' ? 'GLOBAL TOP'
   : result.value?.algorithm === 'cold_start' ? 'COLD START TOP' : 'PERSONALIZED TOP')

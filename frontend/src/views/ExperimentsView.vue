@@ -11,6 +11,14 @@ import AlgorithmPanel from '../components/AlgorithmPanel.vue'
 
 const route = useRoute(), router = useRouter(), auth = useAuth()
 const source = ref('ml'), algorithm = ref('content'), selected = ref(''), typedUserId = ref('')
+const interestGenre = ref('')
+const interestChoices = [
+  { label: '喜剧 · Comedy', value: 'Comedy' }, { label: '科幻 · Sci-Fi', value: 'Sci-Fi' },
+  { label: '动作 · Action', value: 'Action' }, { label: '冒险 · Adventure', value: 'Adventure' },
+  { label: '剧情 · Drama', value: 'Drama' }, { label: '犯罪 · Crime', value: 'Crime' },
+  { label: '惊悚 · Thriller', value: 'Thriller' }, { label: '奇幻 · Fantasy', value: 'Fantasy' },
+  { label: '爱情 · Romance', value: 'Romance' }, { label: '动画 · Animation', value: 'Animation' },
+]
 const userPage = ref(1), users = useRemote<Page<HistoryUser>>(), ratings = useRemote<Page<Movie>>()
 const ratingPage = ref(1), available = ref<Algorithm[]>([]), registryError = ref<unknown>(null)
 const appActivity = ref<{ ratings: number; favorites: number } | null>(null)
@@ -23,7 +31,8 @@ const algorithmGroups = computed(() => [
 const subject = computed(() => source.value === 'ml' ? (selected.value ? `ml:${selected.value}` : '') : auth.account?.subject_key || '')
 const endpoint = computed(() => !subject.value ? null : source.value === 'ml'
   ? `/demo/history-users/${selected.value}/recommendations/${algorithm.value}`
-  : `/me/recommendations/${algorithm.value}`)
+  : `/me/recommendations/${algorithm.value}${algorithm.value === 'cold_start' && interestGenre.value
+    ? `?genre=${encodeURIComponent(interestGenre.value)}` : ''}`)
 const registered = computed(() => available.value.find(a => a.algorithm === algorithm.value)?.status === 'registered')
 const validTypedUserId = computed(() => /^[1-9][0-9]*$/.test(typedUserId.value.trim()) && Number(typedUserId.value.trim()) <= 5000)
 const algorithmLabels: Record<string, string> = {
@@ -35,7 +44,9 @@ const algorithmExplanation = computed(() => ({
   popular: '根据真实历史评分数量和平均分计算热门榜单。',
   content: '根据电影类型与该用户的历史偏好计算推荐。',
   itemcf: '根据共同获得高评分的电影计算相似物品，再结合该用户的评分历史。',
-  cold_start: '针对零评分、零收藏的新账号，回退到真实数据训练的热门榜单。',
+  cold_start: interestGenre.value
+    ? `针对零行为账号，按 ${interestGenre.value} 兴趣筛选真实热门电影。清除兴趣即可对比原始榜单。`
+    : '针对零评分、零收藏的新账号，回退到真实数据训练的热门榜单。',
 }[algorithm.value] || '选择算法查看实时推荐结果。'))
 
 function selectAlgorithm() {
@@ -58,6 +69,8 @@ function updateUrl() {
   void router.replace({ path: '/experiments', query: {
     source: source.value, algorithm: algorithm.value,
     ...(source.value === 'ml' && selected.value ? { user: selected.value } : {}),
+    ...(source.value === 'app' && algorithm.value === 'cold_start' && interestGenre.value
+      ? { genre: interestGenre.value } : {}),
   } })
 }
 function applyUserId() {
@@ -95,6 +108,8 @@ watch(() => route.query, () => {
   selected.value = typeof route.query.user === 'string' && /^[1-9][0-9]*$/.test(route.query.user)
     ? route.query.user : ''
   typedUserId.value = selected.value
+  interestGenre.value = typeof route.query.genre === 'string' &&
+    interestChoices.some(choice => choice.value === route.query.genre) ? route.query.genre : ''
 }, { immediate: true })
 watch(() => [selected.value, source.value], () => { ratingPage.value = 1; void fetchRatings() })
 watch(() => auth.account?.account_id, () => { void fetchAppActivity() }, { immediate: true })
@@ -150,6 +165,13 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
           <span v-else-if="appActivityError">行为数量暂不可用</span>
           <RouterLink v-if="!auth.account" to="/login" class="text-link">前往登录 →</RouterLink>
         </div>
+        <template v-if="source === 'app' && algorithm === 'cold_start'">
+          <label for="interest-genre">兴趣类型（选做加分）</label>
+          <el-select id="interest-genre" v-model="interestGenre" clearable placeholder="不选择：使用热门榜单" @change="updateUrl">
+            <el-option v-for="choice in interestChoices" :key="choice.value" :label="choice.label" :value="choice.value" />
+          </el-select>
+          <p class="form-hint">{{ interestGenre ? `已选择 ${interestGenre}，当前只推荐该类型电影；清除后恢复热门基线。` : '先记录热门基线，再选兴趣类型对比结果。' }}</p>
+        </template>
         <label for="algorithm-select">推荐算法</label>
         <el-select id="algorithm-select" v-model="algorithm" @change="selectAlgorithm">
           <el-option-group v-for="group in algorithmGroups" :key="group.label" :label="group.label">

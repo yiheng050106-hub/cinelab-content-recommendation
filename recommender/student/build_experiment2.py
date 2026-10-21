@@ -27,7 +27,7 @@ MOVIE_BITS = 20
 
 
 def _write_model(data: FrozenData, algorithm: str, version: str, artifact: dict,
-                 parameters: dict) -> Path:
+                 parameters: dict, extra_features: tuple[str, ...] = ()) -> Path:
     directory = ROOT / "models" / "business" / version
     directory.mkdir(parents=True, exist_ok=True)
     artifact_path = directory / "model.json"
@@ -37,7 +37,8 @@ def _write_model(data: FrozenData, algorithm: str, version: str, artifact: dict,
         "dataset_version": DATASET, "split_version": SPLIT, "schema_version": SCHEMA,
         "manifest_sha256": MANIFEST_SHA,
         "training_files": {TRAINING: data.manifest["files"][TRAINING]["sha256"]},
-        "feature_files": {"training-catalog.csv": data.manifest["files"]["training-catalog.csv"]["sha256"]},
+        "feature_files": {name: data.manifest["files"][name]["sha256"]
+                          for name in ("training-catalog.csv", *extra_features)},
         "artifacts": {"model.json": sha256(artifact_path)},
         "parameters": parameters,
         "tool_versions": {"python": "3.12", "implementation": "cinelab-experiment2-v1"},
@@ -94,9 +95,13 @@ def fit() -> tuple[Path, Path, Path]:
     popular = _write_model(data, "popular", POPULAR_VERSION, popular_artifact,
                            {"score": "Bayesian mean + log rating-count bonus", "prior_mean": 3.5,
                             "prior_count": 100, "count_bonus": 0.18})
+    movie_genres = {row["movie_id"]: sorted(set(row["genres"].split("|")) - {"(no genres listed)", ""})
+                    for row in data.rows("movies.csv") if row["movie_id"] in catalog}
+    require(set(movie_genres) == catalog, "冷启动电影类型与目录不一致", "DATA_IDENTITY_INVALID")
     cold = _write_model(data, "cold_start", COLD_VERSION,
-                        {"model_version": COLD_VERSION, "ranked": ranked},
-                        {"strategy": "zero-behavior popular fallback", "popular_model": POPULAR_VERSION})
+                        {"model_version": COLD_VERSION, "ranked": ranked, "genres": movie_genres},
+                        {"strategy": "zero-behavior popular fallback; optional genre-filtered popular",
+                         "popular_model": POPULAR_VERSION}, extra_features=("movies.csv",))
 
     positive_users: Counter[int] = Counter()
     pairs: dict[int, list[float | int]] = {}

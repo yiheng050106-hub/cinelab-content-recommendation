@@ -62,6 +62,10 @@ def check_request(request):
             "推荐输入身份、数量或版本非法", "REQUEST_CONTEXT_INVALID")
     require(request.runtime_mode != "evaluation" or request.subject_kind == "ml",
             "离线评价仅允许冻结ml用户", "REQUEST_CONTEXT_INVALID")
+    require(type(request.interest_genres) is tuple and len(request.interest_genres) <= 3 and
+            all(type(genre) is str and bool(re.fullmatch(r"[A-Za-z-]{2,32}", genre))
+                for genre in request.interest_genres),
+            "兴趣类型格式非法", "REQUEST_CONTEXT_INVALID")
 
 
 def check_provider(provider):

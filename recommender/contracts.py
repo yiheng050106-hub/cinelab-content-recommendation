@@ -23,6 +23,7 @@ class RecommendationRequest:
     runtime_mode: Literal["business", "evaluation"]
     dataset_version: str
     split_version: str
+    interest_genres: tuple[str, ...] = ()
 
 
 class RecommendationItem(BaseModel):
