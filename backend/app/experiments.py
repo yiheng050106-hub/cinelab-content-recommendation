@@ -1,3 +1,6 @@
+import json
+import math
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
@@ -46,8 +49,22 @@ def algorithms():
 
 @router.get("/experiments/evaluations")
 def evaluations():
-    raise APIError(501, "EVALUATION_NOT_IMPLEMENTED", "评价流程留给学生实现；业务API不连接evaluation数据库", {
-        "status": "not_implemented", "metrics": None, "dataset_version": DATASET, "split_version": SPLIT})
+    # Only the offline aggregate is mounted in the business API. The API never
+    # opens evaluation ratings or computes metrics from business history.
+    path = Path("models/business/evaluation-summary.json")
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        assert report["status"] == "completed" and report["partition"] == "validation"
+        assert report["dataset_version"] == DATASET and report["split_version"] == SPLIT
+        assert report["user_count"] == 4209 and report["positive_threshold"] == 4.0
+        assert report["top_k"] == 10 and len(report["task_sha256"]) == 64
+        assert {row["algorithm"] for row in report["metrics"]} == {"content", "itemcf", "als"}
+        assert len(report["metrics"]) == 3
+        assert all(0 <= row[key] <= 1 and math.isfinite(row[key])
+                   for row in report["metrics"] for key in ("precision_at_10", "recall_at_10"))
+    except (OSError, ValueError, KeyError, TypeError, AssertionError):
+        raise APIError(503, "EVALUATION_REPORT_UNAVAILABLE", "离线评价报告缺失或不符合固定验证任务") from None
+    return report
 
 
 @router.get("/me/recommendations/{algorithm}", response_model=RecommendationResult)

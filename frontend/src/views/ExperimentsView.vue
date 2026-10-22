@@ -23,7 +23,12 @@ const userPage = ref(1), users = useRemote<Page<HistoryUser>>(), ratings = useRe
 const ratingPage = ref(1), available = ref<Algorithm[]>([]), registryError = ref<unknown>(null)
 const appActivity = ref<{ ratings: number; favorites: number } | null>(null)
 const appActivityError = ref(false)
-const evaluationError = ref<unknown>(null), evaluationPending = ref(false), evaluationMissing = ref(false)
+type MetricRow = { algorithm: string; model_version: string; precision_at_10: number; recall_at_10: number }
+type EvaluationReport = { status: string; partition: string; user_count: number; positive_threshold: number;
+  top_k: number; computed_at: string; metrics: MetricRow[] }
+const evaluationError = ref<unknown>(null), evaluationPending = ref(false)
+const evaluation = ref<EvaluationReport | null>(null)
+const percent = (value: number) => `${(value * 100).toFixed(2)}%`
 const algorithmGroups = computed(() => [
   { label: '核心算法 · 学生实现', items: available.value.filter(a => ['content', 'itemcf', 'als'].includes(a.algorithm)) },
   { label: '配套策略 · 热门与冷启动', items: available.value.filter(a => ['popular', 'cold_start'].includes(a.algorithm)) },
@@ -68,6 +73,15 @@ const algorithmRules = computed(() => {
         '累加相似度，排除当前用户已评分或已收藏的电影，再显示前 10 部。',
       ],
       note: '续集是另一部电影，例如《Toy Story》和《Toy Story 2》的电影 ID 不同；只有同一电影 ID 才算重复。',
+    }
+    case 'als': return {
+      summary: '用大量用户的真实评分，学习每位用户与每部电影的隐藏偏好。',
+      steps: [
+        '使用 Spark MLlib 的显式反馈 ALS，在历史评分上学习用户和电影的 16 维特征。',
+        '将当前用户特征与候选电影特征配对，计算预测评分并排序。',
+        '过滤已评分或已收藏的电影，展示预测分最高的前 10 部。新注册账号有行为后，会根据自己的评分与收藏估计偏好。',
+      ],
+      note: '显示的是模型预测分，并非用户实际给出的分数；无行为的新账号请使用 Cold Start。',
     }
     case 'cold_start': return {
       summary: '新用户还没有观影记录，先从可靠的热门电影开始。',
@@ -131,12 +145,10 @@ async function fetchRegistry() {
   catch (e) { registryError.value = e }
 }
 async function fetchEvaluation() {
-  evaluationPending.value = true; evaluationError.value = null; evaluationMissing.value = false
-  try { await http.get('/experiments/evaluations') }
-  catch (e) {
-    if (e instanceof ApiError && e.status === 501 && e.code === 'EVALUATION_NOT_IMPLEMENTED') evaluationMissing.value = true
-    else evaluationError.value = e
-  } finally { evaluationPending.value = false }
+  evaluationPending.value = true; evaluationError.value = null
+  try { evaluation.value = (await http.get<EvaluationReport>('/experiments/evaluations')).data }
+  catch (e) { evaluation.value = null; evaluationError.value = e }
+  finally { evaluationPending.value = false }
 }
 watch(() => route.query, () => {
   source.value = route.query.source === 'app' ? 'app' : 'ml'
@@ -158,7 +170,7 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
     <div class="page-heading">
       <p class="eyebrow">RECOMMENDATION LAB</p>
       <h1>推荐实验室<span class="heading-dot">.</span></h1>
-      <p>用真实评分数据对比 Content、Popular、Cold Start 与 ItemCF 的 Top-10 推荐。</p>
+      <p>用真实评分数据对比 Popular、Content、ItemCF、ALS 与 Cold Start 的 Top-10 推荐。</p>
     </div>
     <div class="lab-notice">
       <span class="status-pill">实时结果</span>
@@ -247,9 +259,22 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
         <section class="evaluation-panel">
           <div class="section-top"><h2>离线评价</h2><span class="small-label">PRECISION@10 / RECALL@10</span></div>
           <StatePanel :loading="evaluationPending" :error="evaluationError" @retry="fetchEvaluation">
-            <div class="evaluation-empty"><span class="status-pill">{{ evaluationMissing ? '尚未实现' : '等待接入' }}</span>
-              <p>暂无评价指标，等待离线评价程序接入。</p>
-              <small>训练仅允许使用固定 train；此页面不连接 evaluation 数据库。</small></div>
+            <template v-if="evaluation">
+              <div class="evaluation-context">
+                <span class="status-pill">真实验证集 · {{ evaluation.user_count }} 位用户</span>
+                <p>三种算法使用同一批历史用户。先用固定训练集建模，再与未参与训练的验证评分比较；评分达到 {{ evaluation.positive_threshold }} 分视为喜欢。</p>
+              </div>
+              <div class="table-scroll"><table class="metric-table" aria-label="Content ItemCF ALS 离线评价结果">
+                <thead><tr><th>算法</th><th>Precision@10</th><th>Recall@10</th></tr></thead>
+                <tbody><tr v-for="row in evaluation.metrics" :key="row.algorithm">
+                  <th>{{ algorithmLabels[row.algorithm] || row.algorithm }}</th>
+                  <td>{{ percent(row.precision_at_10) }}</td><td>{{ percent(row.recall_at_10) }}</td>
+                </tr></tbody>
+              </table></div>
+              <p class="metric-explain">Precision@10：推荐的 10 部中，有多少部出现在验证集的高分电影里。Recall@10：验证集的高分电影中，有多少部被推荐命中。表中是 {{ evaluation.user_count }} 位用户分别计算后取平均；短于 10 部仍以 10 为 Precision 分母。</p>
+              <small class="metric-source">固定 validation 分区 · 只读离线报告 · {{ evaluation.computed_at }}</small>
+            </template>
+            <p v-else class="evaluation-empty">评价报告暂不可用。</p>
           </StatePanel>
         </section>
       </div>
@@ -272,4 +297,13 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
 .activity-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
 .activity-counts span, .activity-counts strong { padding: 4px 8px; border: 1px solid var(--border); border-radius: 12px; font-size: 11px; }
 .activity-counts strong { color: var(--accent); border-color: var(--accent); }
+.evaluation-context { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+.evaluation-context p { flex: 1 1 300px; margin: 0; color: var(--muted); line-height: 1.5; }
+.metric-table { width: 100%; border-collapse: collapse; margin: 14px 0; min-width: 470px; }
+.metric-table th, .metric-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+.metric-table thead th { color: var(--muted); font-size: 12px; }
+.metric-table tbody th { color: var(--accent); }
+.metric-table tbody td { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.metric-explain { color: var(--muted); line-height: 1.6; font-size: 13px; }
+.metric-source { color: var(--muted); }
 </style>

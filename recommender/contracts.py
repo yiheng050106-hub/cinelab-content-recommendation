@@ -67,6 +67,7 @@ from .student.content import ContentProvider
 from .student.popular import PopularProvider
 from .student.cold_start import ColdStartProvider
 from .student.itemcf import ItemCFProvider
+from .student.als import ALSProvider
 
 PROVIDERS[Algorithm.content] = ContentProvider(
     model_manifest_path=Path("models/business/content-genres-v1/manifest.json")
@@ -79,6 +80,9 @@ PROVIDERS[Algorithm.cold_start] = ColdStartProvider(
 )
 PROVIDERS[Algorithm.itemcf] = ItemCFProvider(
     model_manifest_path=Path("models/business/itemcf-cobehavior-v1/manifest.json")
+)
+PROVIDERS[Algorithm.als] = ALSProvider(
+    model_manifest_path=Path("models/business/als-spark-explicit-v1/manifest.json")
 )
 
 
