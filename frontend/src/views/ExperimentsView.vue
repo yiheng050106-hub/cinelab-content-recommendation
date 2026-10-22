@@ -51,7 +51,7 @@ const algorithmRules = computed(() => {
       summary: '大家都在看的高口碑电影，来自真实历史评分。',
       steps: [
         '统计每部电影收到多少次评分，以及这些评分的平均分。',
-        '综合口碑和评分人数排序：少数人打满分的电影不会轻易盖过大量人认可的电影。',
+        '先用全站均值平滑平均分，再乘以评分人数的对数：高口碑且很多人看过的电影排在前面。',
         source.value === 'app' ? '为当前账号跳过已经评分或收藏的电影，取前 10 部。' : '展示全站热门前 10 部，历史用户的个人喜好不改变这张榜单。',
       ],
       note: '这是热门榜；分数表示综合热度，不是预测你会打几分。',
@@ -78,7 +78,7 @@ const algorithmRules = computed(() => {
       summary: '用大量用户的真实评分，学习每位用户与每部电影的隐藏偏好。',
       steps: [
         '使用 Spark MLlib 的显式反馈 ALS，在历史评分上学习用户和电影的 16 维特征。',
-        '将当前用户特征与候选电影特征配对，计算预测评分并排序。',
+        '将当前用户特征与候选电影特征配对，再按该电影获得的历史评分次数收缩不可靠的预测分。',
         '过滤已评分或已收藏的电影，展示预测分最高的前 10 部。新注册账号有行为后，会根据自己的评分与收藏估计偏好。',
       ],
       note: '显示的是模型预测分，并非用户实际给出的分数；无行为的新账号请使用 Cold Start。',
@@ -262,9 +262,9 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
             <template v-if="evaluation">
               <div class="evaluation-context">
                 <span class="status-pill">真实验证集 · {{ evaluation.user_count }} 位用户</span>
-                <p>三种算法使用同一批历史用户。先用固定训练集建模，再与未参与训练的验证评分比较；评分达到 {{ evaluation.positive_threshold }} 分视为喜欢。</p>
+                <p>四种算法使用同一批历史用户。先用固定训练集建模，再与未参与训练的验证评分比较；评分达到 {{ evaluation.positive_threshold }} 分视为喜欢。</p>
               </div>
-              <div class="table-scroll"><table class="metric-table" aria-label="Content ItemCF ALS 离线评价结果">
+              <div class="table-scroll"><table class="metric-table" aria-label="Content ItemCF ALS Popular 离线评价结果">
                 <thead><tr><th>算法</th><th>Precision@10</th><th>Recall@10</th></tr></thead>
                 <tbody><tr v-for="row in evaluation.metrics" :key="row.algorithm">
                   <th>{{ algorithmLabels[row.algorithm] || row.algorithm }}</th>

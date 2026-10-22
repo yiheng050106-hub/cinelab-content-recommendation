@@ -8,7 +8,7 @@ from recommender.contracts import Algorithm, RecommendationRequest, Recommendati
 from recommender.data import ContractError, require
 from .popular import ranked_result
 
-MODEL_VERSION = "cold-popular-v1"
+MODEL_VERSION = "cold-popular-v2"
 
 
 @lru_cache(maxsize=1)

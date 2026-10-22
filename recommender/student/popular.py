@@ -8,7 +8,7 @@ from pathlib import Path
 from recommender.contracts import Algorithm, RecommendationItem, RecommendationRequest, RecommendationResult
 from recommender.data import ContractError, require
 
-MODEL_VERSION = "popular-bayes-v1"
+MODEL_VERSION = "popular-bayes-v2"
 
 
 @lru_cache(maxsize=1)

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TRAIN = "evaluation/train.csv"
 CONTENT_VERSION = "content-genres-eval-v1"
 ITEMCF_VERSION = "itemcf-cobehavior-eval-v1"
+POPULAR_VERSION = "popular-bayes-eval-v2"
 
 
 def _save(data: FrozenData, algorithm: str, version: str, filename: str,
@@ -35,7 +36,7 @@ def _save(data: FrozenData, algorithm: str, version: str, filename: str,
     return path
 
 
-def fit() -> tuple[Path, Path]:
+def fit() -> tuple[Path, Path, Path]:
     data = FrozenData()
     catalog = data.catalog()
     genres = {row["movie_id"]: sorted(set(row["genres"].split("|")) - {"(no genres listed)", ""})
@@ -70,6 +71,20 @@ def fit() -> tuple[Path, Path]:
                     {"features": "genres", "weighting": "TF-IDF cosine", "positive_center": 3.0,
                      "negative_weight": 0.5, "quality_prior_weight": 0.08,
                      "quality_prior_pseudocount": 25})
+
+    popular_rows = []
+    for mid in catalog:
+        count = counts[mid]
+        bayes = (totals[mid] + 100 * 3.5) / (count + 100)
+        score = bayes * math.log1p(count)
+        popular_rows.append([mid, round(score, 8), count,
+                             round(totals[mid] / count, 4) if count else None])
+    popular_rows.sort(key=lambda row: (-row[1], int(row[0])))
+    popular = _save(data, "popular", POPULAR_VERSION, "model.json",
+                    {"model_version": POPULAR_VERSION, "ranked": popular_rows},
+                    ("training-catalog.csv",),
+                    {"score": "Bayesian mean multiplied by log(1 + rating count)",
+                     "prior_mean": 3.5, "prior_count": 100})
 
     positive_users: Counter[int] = Counter()
     pairs: dict[int, list[float | int]] = {}
@@ -111,8 +126,8 @@ def fit() -> tuple[Path, Path]:
                    {"positive_rating_at_least": 4.0, "max_likes_per_user": 30,
                     "minimum_pair_support": 2, "support_shrink": 3,
                     "max_neighbors_per_item": 80})
-    print(f"Built evaluation Content and ItemCF from {sum(counts.values())} train ratings")
-    return content, itemcf
+    print(f"Built evaluation Popular, Content and ItemCF from {sum(counts.values())} train ratings")
+    return popular, content, itemcf
 
 
 if __name__ == "__main__":

@@ -8,8 +8,10 @@ from pathlib import Path
 from recommender.data import DATASET, MANIFEST_SHA, SCHEMA, SPLIT, FrozenData, require, sha256
 
 ROOT = Path(__file__).resolve().parents[2]
-MODEL_VERSION = "als-spark-explicit-v1"
+MODEL_VERSION = "als-spark-explicit-v2"
 RANK, REG_PARAM, MAX_ITER, SEED = 16, 0.12, 8, 42
+SUPPORT_PRIOR = 25
+GLOBAL_PRIOR = 3.5
 
 
 def fit(mode: str) -> Path:
@@ -56,11 +58,13 @@ def fit(mode: str) -> Path:
                         implicitPrefs=False, coldStartStrategy="drop", seed=SEED,
                         numUserBlocks=4, numItemBlocks=4, checkpointInterval=-1)
         model = estimator.fit(ratings)
+        support = {str(row.movieId): int(row["count"])
+                   for row in ratings.groupBy("movieId").count().collect()}
         users = {str(row.id): [float(value) for value in row.features]
                  for row in model.userFactors.collect()}
         items = {str(row.id): [float(value) for value in row.features]
                  for row in model.itemFactors.collect()}
-        require(bool(users) and bool(items) and set(items) <= catalog,
+        require(bool(users) and bool(items) and set(items) <= catalog and set(support) == set(items),
                 "ALS因子不在批准目录", "MODEL_BINDING_INVALID")
         spark_version = spark.version
     finally:
@@ -70,7 +74,8 @@ def fit(mode: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     artifact_path = directory / "factors.json"
     artifact_path.write_text(json.dumps({"model_version": MODEL_VERSION, "rank": RANK,
-                                         "users": users, "items": items}, separators=(",", ":")), encoding="utf-8")
+                                         "users": users, "items": items, "support": support},
+                                        separators=(",", ":")), encoding="utf-8")
     manifest = {"algorithm": "als", "model_version": MODEL_VERSION, "runtime_mode": mode,
                 "dataset_version": DATASET, "split_version": SPLIT, "schema_version": SCHEMA,
                 "manifest_sha256": MANIFEST_SHA,
@@ -78,7 +83,9 @@ def fit(mode: str) -> Path:
                 "feature_files": {"training-catalog.csv": data.manifest["files"]["training-catalog.csv"]["sha256"]},
                 "artifacts": {"factors.json": sha256(artifact_path)},
                 "parameters": {"rank": RANK, "regParam": REG_PARAM, "maxIter": MAX_ITER,
-                               "seed": SEED, "implicitPrefs": False, "coldStartStrategy": "drop"},
+                               "seed": SEED, "implicitPrefs": False, "coldStartStrategy": "drop",
+                               "support_prior": SUPPORT_PRIOR, "global_prior": GLOBAL_PRIOR,
+                               "ranking": "global_prior + n/(n+support_prior) * (ALS_prediction-global_prior)"},
                 "tool_versions": {"python": ".".join(map(str, sys.version_info[:3])),
                                   "pyspark": spark_version, "implementation": "Spark MLlib ALS"}}
     path = directory / "manifest.json"

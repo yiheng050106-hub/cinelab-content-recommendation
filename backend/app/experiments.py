@@ -58,8 +58,8 @@ def evaluations():
         assert report["dataset_version"] == DATASET and report["split_version"] == SPLIT
         assert report["user_count"] == 4209 and report["positive_threshold"] == 4.0
         assert report["top_k"] == 10 and len(report["task_sha256"]) == 64
-        assert {row["algorithm"] for row in report["metrics"]} == {"content", "itemcf", "als"}
-        assert len(report["metrics"]) == 3
+        assert {row["algorithm"] for row in report["metrics"]} == {"content", "itemcf", "als", "popular"}
+        assert len(report["metrics"]) == 4
         assert all(0 <= row[key] <= 1 and math.isfinite(row[key])
                    for row in report["metrics"] for key in ("precision_at_10", "recall_at_10"))
     except (OSError, ValueError, KeyError, TypeError, AssertionError):

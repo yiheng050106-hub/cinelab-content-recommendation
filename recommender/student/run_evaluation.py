@@ -22,8 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
 MODELS = {
     "content": "content-genres-eval-v1",
     "itemcf": "itemcf-cobehavior-eval-v1",
-    "als": "als-spark-explicit-v1",
+    "als": "als-spark-explicit-v2",
+    "popular": "popular-bayes-eval-v2",
 }
+ALS_SUPPORT_PRIOR = 25
+ALS_GLOBAL_PRIOR = 3.5
 
 
 def _dto(algorithm: str, version: str, ranked: list[tuple[str, float]]) -> dict:
@@ -80,6 +83,9 @@ def evaluate() -> dict:
     factors = json.loads((manifests["als"].parent / "factors.json").read_text(encoding="utf-8"))
     als_movies = sorted(factors["items"], key=int)
     als_matrix = np.asarray([factors["items"][mid] for mid in als_movies], dtype=np.float32)
+    als_confidence = np.asarray([factors["support"][mid] / (factors["support"][mid] + ALS_SUPPORT_PRIOR)
+                                 for mid in als_movies], dtype=np.float32)
+    popular_rows = json.loads((manifests["popular"].parent / "model.json").read_text(encoding="utf-8"))["ranked"]
     outputs = {name: ROOT / "models" / "evaluation" / f"{name}-validation-predictions.jsonl"
                for name in MODELS}
     streams = {name: path.open("w", encoding="utf-8", newline="\n") for name, path in outputs.items()}
@@ -114,8 +120,15 @@ def evaluate() -> dict:
                             key=lambda pair: (-pair[1], int(pair[0])))[:10]
 
             user_factor = factors["users"].get(uid)
-            als_top = _top(als_matrix @ np.asarray(user_factor, dtype=np.float32), als_movies, seen) if user_factor else []
-            for name, ranked in (("content", content_top), ("itemcf", cf_top), ("als", als_top)):
+            als_top = []
+            if user_factor:
+                predictions = als_matrix @ np.asarray(user_factor, dtype=np.float32)
+                adjusted = ALS_GLOBAL_PRIOR + als_confidence * (predictions - ALS_GLOBAL_PRIOR)
+                als_top = _top(adjusted, als_movies, seen)
+            popular_top = [(mid, score) for mid, score, _count, _mean in popular_rows
+                           if mid not in seen][:10]
+            for name, ranked in (("content", content_top), ("itemcf", cf_top),
+                                 ("als", als_top), ("popular", popular_top)):
                 dto = _dto(name, MODELS[name], ranked)
                 streams[name].write(json.dumps({"ml_user_id": uid, "result": dto}, separators=(",", ":")) + "\n")
     finally:

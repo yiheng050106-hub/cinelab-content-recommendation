@@ -73,16 +73,16 @@ PROVIDERS[Algorithm.content] = ContentProvider(
     model_manifest_path=Path("models/business/content-genres-v1/manifest.json")
 )
 PROVIDERS[Algorithm.popular] = PopularProvider(
-    model_manifest_path=Path("models/business/popular-bayes-v1/manifest.json")
+    model_manifest_path=Path("models/business/popular-bayes-v2/manifest.json")
 )
 PROVIDERS[Algorithm.cold_start] = ColdStartProvider(
-    model_manifest_path=Path("models/business/cold-popular-v1/manifest.json")
+    model_manifest_path=Path("models/business/cold-popular-v2/manifest.json")
 )
 PROVIDERS[Algorithm.itemcf] = ItemCFProvider(
     model_manifest_path=Path("models/business/itemcf-cobehavior-v1/manifest.json")
 )
 PROVIDERS[Algorithm.als] = ALSProvider(
-    model_manifest_path=Path("models/business/als-spark-explicit-v1/manifest.json")
+    model_manifest_path=Path("models/business/als-spark-explicit-v2/manifest.json")
 )
 
 

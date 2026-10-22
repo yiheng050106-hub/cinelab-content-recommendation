@@ -9,21 +9,24 @@ from pathlib import Path
 from recommender.contracts import Algorithm, RecommendationItem, RecommendationRequest, RecommendationResult
 from recommender.data import ContractError, require
 
-MODEL_VERSION = "als-spark-explicit-v1"
+MODEL_VERSION = "als-spark-explicit-v2"
+SUPPORT_PRIOR = 25
+GLOBAL_PRIOR = 3.5
 
 
 @lru_cache(maxsize=1)
-def load_factors(path: str) -> tuple[int, dict[str, list[float]], dict[str, list[float]]]:
+def load_factors(path: str) -> tuple[int, dict[str, list[float]], dict[str, list[float]], dict[str, int]]:
     try:
         artifact = json.loads(Path(path).read_text(encoding="utf-8"))
         require(artifact["model_version"] == MODEL_VERSION, "ALS模型版本不符", "MODEL_BINDING_INVALID")
         rank = artifact["rank"]
-        users, items = artifact["users"], artifact["items"]
+        users, items, support = artifact["users"], artifact["items"], artifact["support"]
         require(type(rank) is int and rank > 0 and bool(users) and bool(items) and
+                set(support) == set(items) and all(type(n) is int and n > 0 for n in support.values()) and
                 all(len(row) == rank and all(math.isfinite(x) for x in row)
                     for row in (*users.values(), *items.values())),
                 "ALS因子不完整", "MODEL_BINDING_INVALID")
-        return rank, users, items
+        return rank, users, items, support
     except (OSError, KeyError, ValueError, TypeError) as exc:
         raise ContractError("MODEL_BINDING_INVALID", "ALS模型工件无法读取") from exc
 
@@ -77,12 +80,13 @@ class ALSProvider:
         from recommender.business import read_history
 
         require(request.runtime_mode == "business", "业务ALS不用于离线评价", "DATA_MODE_INVALID")
-        rank, users, items = load_factors(str(self.model_manifest_path.parent / "factors.json"))
+        rank, users, items, support = load_factors(str(self.model_manifest_path.parent / "factors.json"))
         history = read_history(request)
         seen = {entry.movie_id for entry in history.ratings} | set(history.favorite_movie_ids)
         factors = users.get(str(request.subject_id)) if request.subject_kind == "ml" else fold_in(rank, items, history)
         scored = [] if factors is None else [
-            (mid, round(sum(left * right for left, right in zip(factors, values)), 8))
+            (mid, round(GLOBAL_PRIOR + support[mid] / (support[mid] + SUPPORT_PRIOR) *
+                        (sum(left * right for left, right in zip(factors, values)) - GLOBAL_PRIOR), 8))
             for mid, values in items.items() if mid not in seen]
         scored.sort(key=lambda pair: (-pair[1], int(pair[0])))
         selected = scored[:request.limit]

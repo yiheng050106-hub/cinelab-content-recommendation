@@ -18,8 +18,8 @@ from recommender.data import DATASET, MANIFEST_SHA, SCHEMA, SPLIT, FrozenData, r
 
 ROOT = Path(__file__).resolve().parents[2]
 TRAINING = "business/history_ratings.csv"
-POPULAR_VERSION = "popular-bayes-v1"
-COLD_VERSION = "cold-popular-v1"
+POPULAR_VERSION = "popular-bayes-v2"
+COLD_VERSION = "cold-popular-v2"
 ITEMCF_VERSION = "itemcf-cobehavior-v1"
 MAX_LIKES_PER_USER = 30
 MAX_NEIGHBORS = 80
@@ -82,19 +82,18 @@ def fit() -> tuple[Path, Path, Path]:
             row_count += 1
     require(row_count == expected["records"], "业务评分行数不符", "DATA_IDENTITY_INVALID")
 
-    max_count = max(counts.values())
     ranked = []
     for movie_id in map(int, catalog):
         count = counts[movie_id]
         bayes = (totals[movie_id] + 100 * 3.5) / (count + 100)
-        score = bayes + 0.18 * math.log1p(count) / math.log1p(max_count)
+        score = bayes * math.log1p(count)
         ranked.append([str(movie_id), round(score, 8), count, round(totals[movie_id] / count, 4) if count else None])
     ranked.sort(key=lambda row: (-row[1], int(row[0])))
 
     popular_artifact = {"model_version": POPULAR_VERSION, "ranked": ranked}
     popular = _write_model(data, "popular", POPULAR_VERSION, popular_artifact,
-                           {"score": "Bayesian mean + log rating-count bonus", "prior_mean": 3.5,
-                            "prior_count": 100, "count_bonus": 0.18})
+                           {"score": "Bayesian mean multiplied by log(1 + rating count)",
+                            "prior_mean": 3.5, "prior_count": 100})
     movie_genres = {row["movie_id"]: sorted(set(row["genres"].split("|")) - {"(no genres listed)", ""})
                     for row in data.rows("movies.csv") if row["movie_id"] in catalog}
     require(set(movie_genres) == catalog, "冷启动电影类型与目录不一致", "DATA_IDENTITY_INVALID")
