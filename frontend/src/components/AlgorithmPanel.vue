@@ -18,7 +18,7 @@ const films = ref<Record<string, Movie>>({})
 const highestScore = computed(() => Math.max(0, ...result.value?.items.map(item => item.score ?? 0) || []))
 const resultMethod = computed(() => ({
   popular: '评分数量与平均分', content: '电影类型与历史偏好',
-  itemcf: '相似电影与评分历史', cold_start: result.value?.items[0]?.recall_sources?.includes('genre_filtered_popular')
+  itemcf: '相似电影与评分历史', rrf: 'Content、ItemCF、ALS 与 Popular 的实时排名融合', cold_start: result.value?.items[0]?.recall_sources?.includes('genre_filtered_popular')
     ? '所选兴趣类型与热门排序' : '零行为热门回退',
 }[result.value?.algorithm || ''] || '真实评分数据'))
 const resultScope = computed(() => result.value?.algorithm === 'popular' ? 'GLOBAL TOP'
@@ -82,6 +82,9 @@ watch(() => props.endpoint, load, { immediate: true })
               <RouterLink :to="`/movies/${item.movie_id}`" class="recommendation-title">{{ films[item.movie_id]?.title_zh || films[item.movie_id]?.movielens_title || `电影 #${item.movie_id}` }}</RouterLink>
               <p class="recommendation-subtitle">#{{ item.movie_id }}<span v-if="films[item.movie_id]?.release_year"> · {{ films[item.movie_id]?.release_year }}</span></p>
               <div class="recommendation-genres"><span v-for="genre in films[item.movie_id]?.genres.slice(0, 3) || []" :key="genre">{{ genre }}</span></div>
+              <div v-if="result.algorithm === 'rrf' && item.recall_ranks" class="fusion-evidence">
+                <span v-for="(rank, source) in item.recall_ranks" :key="source">{{ source }} #{{ rank }}</span>
+              </div>
               <div v-if="item.score !== null" class="recommendation-score"><div class="score-track"><div class="score-fill" :style="{ width: scoreWidth(item.score) }"></div></div><strong>{{ item.score.toFixed(3) }}</strong></div>
             </div>
           </li>
@@ -109,6 +112,8 @@ watch(() => props.endpoint, load, { immediate: true })
 .recommendation-subtitle { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .recommendation-genres { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .recommendation-genres span { padding: 1px 7px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); font-size: 10px; }
+.fusion-evidence { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.fusion-evidence span { padding: 2px 7px; border-radius: 4px; background: #d6b47624; color: var(--accent); font-size: 10px; font-weight: 700; }
 .recommendation-score { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
 .score-track { height: 4px; flex: 1; background: #d8c1942e; border-radius: 9px; overflow: hidden; }
 .score-fill { height: 100%; background: var(--accent); border-radius: inherit; }

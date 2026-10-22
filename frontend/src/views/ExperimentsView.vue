@@ -10,6 +10,7 @@ import PageNav from '../components/PageNav.vue'
 import AlgorithmPanel from '../components/AlgorithmPanel.vue'
 
 const route = useRoute(), router = useRouter(), auth = useAuth()
+const capture = computed(() => route.query.capture === 'rrf' || route.query.capture === 'feedback' ? route.query.capture : '')
 const source = ref('ml'), algorithm = ref('content'), selected = ref(''), typedUserId = ref('')
 const interestGenre = ref('')
 const interestChoices = [
@@ -23,6 +24,14 @@ const userPage = ref(1), users = useRemote<Page<HistoryUser>>(), ratings = useRe
 const ratingPage = ref(1), available = ref<Algorithm[]>([]), registryError = ref<unknown>(null)
 const appActivity = ref<{ ratings: number; favorites: number } | null>(null)
 const appActivityError = ref(false)
+type FeedbackEvent = { event_id: string; movie_id: string; action: string; rating: number | null;
+  favorited: boolean; genres: string[]; partition: number; offset: number; occurred_at: string }
+type FeedbackSnapshot = { status: string; topic: string; account_id: string; processed_events: number;
+  rated_movies: number; favorite_movies: number; interests: { genre: string; weight: number }[];
+  recent_events: FeedbackEvent[] }
+const feedback = ref<FeedbackSnapshot | null>(null), feedbackError = ref<unknown>(null)
+const feedbackPending = ref(false), feedbackAction = ref(''), feedbackMovieId = ref('1'), feedbackRating = ref(5)
+const feedbackMovieValid = computed(() => /^[1-9][0-9]*$/.test(feedbackMovieId.value.trim()))
 type MetricRow = { algorithm: string; model_version: string; precision_at_10: number; recall_at_10: number }
 type EvaluationReport = { status: string; partition: string; user_count: number; positive_threshold: number;
   top_k: number; computed_at: string; metrics: MetricRow[] }
@@ -31,6 +40,7 @@ const evaluation = ref<EvaluationReport | null>(null)
 const percent = (value: number) => `${(value * 100).toFixed(2)}%`
 const algorithmGroups = computed(() => [
   { label: '核心算法 · 学生实现', items: available.value.filter(a => ['content', 'itemcf', 'als'].includes(a.algorithm)) },
+  { label: '扩展算法 · 多算法融合', items: available.value.filter(a => a.algorithm === 'rrf') },
   { label: '配套策略 · 热门与冷启动', items: available.value.filter(a => ['popular', 'cold_start'].includes(a.algorithm)) },
 ])
 const subject = computed(() => source.value === 'ml' ? (selected.value ? `ml:${selected.value}` : '') : auth.account?.subject_key || '')
@@ -44,6 +54,7 @@ const algorithmLabels: Record<string, string> = {
   popular: 'Popular · 热门推荐', content: 'Content · 类型推荐',
   itemcf: 'ItemCF · 物品协同过滤', cold_start: 'Cold Start · 零行为推荐',
   als: 'ALS · 矩阵分解',
+  rrf: 'RRF · 多算法融合',
 }
 const algorithmRules = computed(() => {
   switch (algorithm.value) {
@@ -92,6 +103,15 @@ const algorithmRules = computed(() => {
       ],
       note: '账号一旦评分或收藏，便不再符合零行为条件，可改用 Content 或 ItemCF。',
     }
+    case 'rrf': return {
+      summary: '让多种推荐方法各自选片，再汇总它们的排名。',
+      steps: [
+        '实时运行 Content、ItemCF、ALS 和 Popular，每种算法最多提供前 50 部候选电影。',
+        '同一部电影在每份列表中的第 r 名，贡献 1÷(60+r)；把各来源贡献相加。',
+        '跳过此用户已评分或收藏的电影，按总分排序取前 10 部；卡片显示每个来源的原始名次。',
+      ],
+      note: '融合分数仅表示多个榜单的排名支持程度，不是预测评分；没有历史行为时主要依赖热门榜。',
+    }
     default: return {
       summary: '此算法尚未接入，当前没有真实推荐结果。',
       steps: ['请选择已接入的 Popular、Content、Cold Start 或 ItemCF。'],
@@ -115,6 +135,32 @@ async function fetchAppActivity() {
     appActivity.value = { ratings: ratings.data.total, favorites: favorites.data.total }
   } catch { appActivityError.value = true }
 }
+async function fetchFeedback() {
+  feedbackError.value = null
+  if (!auth.account) { feedback.value = null; return }
+  try { feedback.value = (await http.get<FeedbackSnapshot>('/me/feedback-stream')).data }
+  catch (error) { feedbackError.value = error }
+}
+async function sendFeedback(action: 'rating' | 'favorite' | 'remove') {
+  if (!feedbackMovieValid.value || feedbackPending.value) return
+  feedbackPending.value = true; feedbackAction.value = ''
+  try {
+    const path = `/me/${action === 'rating' ? 'ratings' : 'favorites'}/${feedbackMovieId.value.trim()}`
+    const response = action === 'remove' ? await http.delete(path)
+      : await http.put(path, action === 'rating' ? { rating: feedbackRating.value } : {})
+    const delivery = response.data?.kafka_event
+    feedbackAction.value = delivery?.status === 'delivered'
+      ? `事件已写入 Kafka：${delivery.topic} · offset ${delivery.offset}`
+      : action === 'remove' ? '已取消收藏，正在等待 Kafka 消费者更新。' : '行为已保存；Kafka 当前不可用，请检查服务。'
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await fetchFeedback()
+      if (!delivery?.event_id || feedback.value?.recent_events.some(event => event.event_id === delivery.event_id)) break
+    }
+    await fetchAppActivity()
+  } catch (error) { feedbackAction.value = error instanceof ApiError ? error.message : '行为提交失败' }
+  finally { feedbackPending.value = false }
+}
 
 function updateUrl() {
   void router.replace({ path: '/experiments', query: {
@@ -122,6 +168,7 @@ function updateUrl() {
     ...(source.value === 'ml' && selected.value ? { user: selected.value } : {}),
     ...(source.value === 'app' && algorithm.value === 'cold_start' && interestGenre.value
       ? { genre: interestGenre.value } : {}),
+    ...(capture.value ? { capture: capture.value } : {}),
   } })
 }
 function applyUserId() {
@@ -161,23 +208,23 @@ watch(() => route.query, () => {
     interestChoices.some(choice => choice.value === route.query.genre) ? route.query.genre : ''
 }, { immediate: true })
 watch(() => [selected.value, source.value], () => { ratingPage.value = 1; void fetchRatings() })
-watch(() => auth.account?.account_id, () => { void fetchAppActivity() }, { immediate: true })
+watch(() => auth.account?.account_id, () => { void fetchAppActivity(); void fetchFeedback() }, { immediate: true })
 void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatings()
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" :class="{ 'capture-rrf': capture === 'rrf', 'capture-feedback': capture === 'feedback' }">
     <div class="page-heading">
       <p class="eyebrow">RECOMMENDATION LAB</p>
       <h1>推荐实验室<span class="heading-dot">.</span></h1>
-      <p>用真实评分数据对比 Popular、Content、ItemCF、ALS 与 Cold Start 的 Top-10 推荐。</p>
+      <p>用真实评分数据对比 Popular、Content、ItemCF、ALS、Cold Start 与 RRF 的 Top-10 推荐。</p>
     </div>
     <div class="lab-notice">
       <span class="status-pill">实时结果</span>
       <p>{{ algorithmRules.summary }} 已接入算法的结果由真实数据生成。</p>
     </div>
     <div class="lab-layout">
-      <aside class="lab-controls">
+      <aside v-if="!capture" class="lab-controls">
         <h2>实验设置</h2>
         <label for="subject-source">用户来源</label>
         <el-select id="subject-source" v-model="source" @change="updateUrl">
@@ -235,15 +282,36 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
         </div>
       </aside>
       <div class="lab-results">
-        <section class="algorithm-guide" :aria-label="`${algorithmLabels[algorithm] || algorithm} 的推荐规则`">
+        <section v-if="!capture" class="algorithm-guide" :aria-label="`${algorithmLabels[algorithm] || algorithm} 的推荐规则`">
           <div class="section-top"><h2>这套算法怎么推荐</h2><span class="status-pill">{{ algorithmLabels[algorithm] || algorithm }}</span></div>
           <p class="guide-summary">{{ algorithmRules.summary }}</p>
           <ol><li v-for="step in algorithmRules.steps" :key="step">{{ step }}</li></ol>
           <p class="guide-note">{{ algorithmRules.note }}</p>
         </section>
-        <AlgorithmPanel :label="`${algorithmLabels[algorithm] || algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
+        <AlgorithmPanel v-if="capture !== 'feedback'" :label="`${algorithmLabels[algorithm] || algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
           :empty-subject="source === 'ml' ? '请选择历史用户' : '登录后体验'" @refresh="fetchAppActivity" />
-        <section v-if="source === 'ml'" class="history-panel">
+        <section v-if="source === 'app' && capture !== 'rrf'" class="feedback-panel">
+          <div class="section-top"><h2>S3 · Kafka 行为反馈</h2><el-button :disabled="feedbackPending" @click="fetchFeedback">刷新消费状态</el-button></div>
+          <p>当前账号 {{ auth.account?.login_name || '未登录' }} · 评分或收藏真实电影后，事件进入 Kafka，消费者按电影类型更新兴趣权重。</p>
+          <div v-if="auth.account" class="feedback-form">
+            <label>电影 ID <el-input v-model="feedbackMovieId" inputmode="numeric" placeholder="例如 1" /></label>
+            <label>评分 <el-select v-model="feedbackRating"><el-option v-for="score in [1,2,3,4,5]" :key="score" :label="`${score} 分`" :value="score" /></el-select></label>
+            <el-button type="primary" :disabled="!feedbackMovieValid || feedbackPending" @click="sendFeedback('rating')">提交评分</el-button>
+            <el-button :disabled="!feedbackMovieValid || feedbackPending" @click="sendFeedback('favorite')">收藏电影</el-button>
+            <el-button :disabled="!feedbackMovieValid || feedbackPending" @click="sendFeedback('remove')">取消收藏</el-button>
+          </div>
+          <RouterLink v-else to="/login" class="text-link">登录后体验 Kafka 行为反馈 →</RouterLink>
+          <p v-if="feedbackAction" class="feedback-action" role="status">{{ feedbackAction }}</p>
+          <StatePanel v-if="feedbackError" :error="feedbackError" @retry="fetchFeedback" />
+          <div v-if="feedback" class="feedback-state">
+            <div class="feedback-stats"><span>消息队列 <strong>{{ feedback.status }}</strong></span><span>主题 <strong>{{ feedback.topic }}</strong></span><span>已消费事件 <strong>{{ feedback.processed_events }}</strong></span><span>当前账号评分 / 收藏 <strong>{{ feedback.rated_movies }} / {{ feedback.favorite_movies }}</strong></span></div>
+            <div class="feedback-columns">
+              <div><h3>从 Kafka 事件计算的兴趣</h3><p v-if="!feedback.interests.length">尚无正向兴趣事件。</p><div v-for="interest in feedback.interests.slice(0, 8)" :key="interest.genre" class="interest-row"><span>{{ interest.genre }}</span><strong>{{ interest.weight.toFixed(2) }}</strong></div></div>
+              <div><h3>最近真实事件</h3><p v-if="!feedback.recent_events.length">暂无已消费事件。</p><div v-for="event in feedback.recent_events" :key="event.event_id" class="event-row"><strong>{{ event.action }}</strong><span>电影 #{{ event.movie_id }} · {{ event.genres.join(' / ') }}</span><small>partition {{ event.partition }} · offset {{ event.offset }}</small></div></div>
+            </div>
+          </div>
+        </section>
+        <section v-if="source === 'ml' && !capture" class="history-panel">
           <div class="section-top"><h2>历史评分</h2><span class="status-pill">{{ subject || '未选择用户' }} · 只读</span></div>
           <StatePanel :loading="ratings.loading.value" :error="ratings.error.value"
             :empty="!selected || !!ratings.data.value && !ratings.data.value.items.length"
@@ -256,7 +324,7 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
             <PageNav :page="ratingPage" :size="10" :total="ratings.data.value?.total || 0" @change="ratingPage = $event; fetchRatings()" />
           </StatePanel>
         </section>
-        <section class="evaluation-panel">
+        <section v-if="!capture" class="evaluation-panel">
           <div class="section-top"><h2>离线评价</h2><span class="small-label">PRECISION@10 / RECALL@10</span></div>
           <StatePanel :loading="evaluationPending" :error="evaluationError" @retry="fetchEvaluation">
             <template v-if="evaluation">
@@ -283,6 +351,34 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
 </template>
 
 <style scoped>
+.capture-rrf :deep(.recommendation-card) { min-height: 0; padding: 7px 10px; gap: 8px; }
+.capture-rrf .lab-layout { display: block; }
+.capture-rrf .lab-results, .capture-feedback .lab-results { max-width: 760px; }
+.capture-rrf :deep(.recommendation-grid) { gap: 7px; }
+.capture-rrf :deep(.recommendation-genres), .capture-rrf :deep(.recommendation-score) { display: none; }
+.capture-rrf :deep(.recommendation-title) { font-size: 13px; line-height: 1.2; }
+.capture-rrf :deep(.recommendation-rank) { font-size: 20px; }
+.capture-rrf :deep(.fusion-evidence) { margin-top: 4px; }
+.capture-rrf :deep(.result-hero) { padding: 10px 16px; margin-bottom: 8px; }
+.capture-rrf :deep(.content-results) { padding: 10px; }
+.capture-feedback .lab-layout { display: block; }
+.capture-feedback .feedback-panel { margin-top: 0; }
+.feedback-panel { padding: 20px 24px; margin: 18px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.feedback-panel > p { color: var(--muted); line-height: 1.6; }
+.feedback-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 16px 0; }
+.feedback-form label { display: flex; flex-direction: column; gap: 5px; min-width: 110px; font-size: 12px; }
+.feedback-form label:first-child { width: 150px; }
+.feedback-action { color: var(--accent) !important; font-weight: 700; }
+.feedback-stats { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.feedback-stats span { font-size: 12px; color: var(--muted); }
+.feedback-stats strong { color: var(--text); }
+.feedback-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.feedback-columns h3 { font-size: 14px; }
+.interest-row, .event-row { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.interest-row { justify-content: space-between; }
+.event-row { flex-wrap: wrap; }
+.event-row small { color: var(--muted); }
+@media(max-width: 780px) { .feedback-columns { grid-template-columns: 1fr; } }
 .algorithm-guide { padding: 20px 24px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .algorithm-guide .section-top { align-items: center; }
 .algorithm-guide .section-top h2 { font-size: 18px; }

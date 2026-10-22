@@ -10,6 +10,15 @@ from .security import ActorDependency, authenticated_write
 router = APIRouter(prefix="/me", tags=["当前账号评分与收藏"])
 
 
+def _movie_state(conn, account_id: int, movie_id: int) -> tuple[str, float | None, bool]:
+    genres = conn.execute(text("SELECT genres FROM movies WHERE movie_id=:mid"), {"mid": movie_id}).scalar_one()
+    rating = conn.execute(text("SELECT rating FROM account_ratings WHERE account_id=:uid AND movie_id=:mid"),
+        {"uid": account_id, "mid": movie_id}).scalar_one_or_none()
+    favorite = conn.execute(text("SELECT 1 FROM account_favorites WHERE account_id=:uid AND movie_id=:mid"),
+        {"uid": account_id, "mid": movie_id}).first() is not None
+    return genres, float(rating) if rating is not None else None, favorite
+
+
 @router.put("/ratings/{movie_id}")
 def rate_movie(movie_id: IdPath, body: RatingInput, request: Request, actor: ActorDependency):
     mid = identifier(movie_id)
@@ -20,7 +29,9 @@ def rate_movie(movie_id: IdPath, body: RatingInput, request: Request, actor: Act
             {"uid": actor.account_id, "mid": mid, "rating": body.rating})
         row = conn.execute(text("SELECT movie_id,rating,created_at,updated_at FROM account_ratings WHERE account_id=:uid AND movie_id=:mid"),
             {"uid": actor.account_id, "mid": mid}).mappings().one()
-    return {**public_row(row), "subject_key": "app:" + str(actor.account_id)}
+        genres, rating, favorited = _movie_state(conn, actor.account_id, mid)
+    event = request.app.state.feedback_stream.publish(actor.account_id, mid, genres, rating, favorited, "rating_set")
+    return {**public_row(row), "subject_key": "app:" + str(actor.account_id), "kafka_event": event}
 
 
 @router.get("/ratings")
@@ -55,7 +66,9 @@ def favorite(movie_id: IdPath, request: Request, actor: ActorDependency, body: I
         if row is None:
             conn.execute(text("INSERT INTO account_favorites(account_id,movie_id) VALUES(:uid,:mid)"), values)
         when = conn.execute(text("SELECT created_at FROM account_favorites WHERE account_id=:uid AND movie_id=:mid FOR UPDATE"), values).scalar_one()
-    return {"movie_id": str(mid), "favorited": True, "created_at": when.isoformat(timespec="microseconds") + "Z"}
+        genres, rating, favorited = _movie_state(conn, actor.account_id, mid)
+    event = request.app.state.feedback_stream.publish(actor.account_id, mid, genres, rating, favorited, "favorite_added")
+    return {"movie_id": str(mid), "favorited": True, "created_at": when.isoformat(timespec="microseconds") + "Z", "kafka_event": event}
 
 
 @router.delete("/favorites/{movie_id}", status_code=204, response_class=Response)
@@ -64,7 +77,14 @@ def unfavorite(movie_id: IdPath, request: Request, actor: ActorDependency, body:
     with authenticated_write(request, actor) as conn:
         require_movie(conn, mid)
         conn.execute(text("DELETE FROM account_favorites WHERE account_id=:uid AND movie_id=:mid"), {"uid": actor.account_id, "mid": mid})
+        genres, rating, favorited = _movie_state(conn, actor.account_id, mid)
+    request.app.state.feedback_stream.publish(actor.account_id, mid, genres, rating, favorited, "favorite_removed")
     return Response(status_code=204)
+
+
+@router.get("/feedback-stream")
+def feedback_stream(request: Request, actor: ActorDependency):
+    return request.app.state.feedback_stream.snapshot(actor.account_id)
 
 
 @router.get("/favorites")

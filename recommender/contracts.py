@@ -13,6 +13,7 @@ class Algorithm(StrEnum):
     itemcf = "itemcf"
     als = "als"
     cold_start = "cold_start"
+    rrf = "rrf"
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ from .student.popular import PopularProvider
 from .student.cold_start import ColdStartProvider
 from .student.itemcf import ItemCFProvider
 from .student.als import ALSProvider
+from .student.rrf import RRFProvider
 
 PROVIDERS[Algorithm.content] = ContentProvider(
     model_manifest_path=Path("models/business/content-genres-v1/manifest.json")
@@ -83,6 +85,9 @@ PROVIDERS[Algorithm.itemcf] = ItemCFProvider(
 )
 PROVIDERS[Algorithm.als] = ALSProvider(
     model_manifest_path=Path("models/business/als-spark-explicit-v2/manifest.json")
+)
+PROVIDERS[Algorithm.rrf] = RRFProvider(
+    model_manifest_path=Path("models/business/rrf-v1/manifest.json")
 )
 
 

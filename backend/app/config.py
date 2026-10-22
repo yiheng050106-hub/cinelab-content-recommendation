@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     db_password: SecretStr
     db_socket: str | None = None
     db_ssl_ca: str | None = None
+    kafka_bootstrap_servers: str = ""
     manifest_path: Path = ROOT / "data/packages" / DATASET / "manifest.json"
 
     @model_validator(mode="after")

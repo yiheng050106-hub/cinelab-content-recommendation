@@ -16,6 +16,7 @@ from .auth import router as auth_router
 from .catalog import router as catalog_router
 from .activity import router as activity_router
 from .experiments import router as experiments_router
+from .feedback_stream import FeedbackStream
 
 log = logging.getLogger("course_api")
 
@@ -28,6 +29,7 @@ def require_ready(request: Request) -> None:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings(_env_file=os.getenv("APP_ENV_FILE", str(ROOT / "backend/.env")))
     db = Database(settings)
+    feedback_stream = FeedbackStream(settings.kafka_bootstrap_servers)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -39,12 +41,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.error("Startup readiness rejected: %s", exc.code)
         except SQLAlchemyError:
             log.error("Startup database unavailable")
+        feedback_stream.start()
         yield
+        feedback_stream.close()
         db.engine.dispose()
 
     app = FastAPI(title="推荐算法课程基础业务API", version="4B", lifespan=lifespan)
     app.state.settings, app.state.db, app.state.ready = settings, db, False
     app.state.login_limiter = LoginLimiter()
+    app.state.feedback_stream = feedback_stream
 
     @app.middleware("http")
     async def request_metadata(request: Request, call_next):

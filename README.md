@@ -14,4 +14,6 @@
 
 小组实现记录：[Content 推荐](docs/content-recommendation.md) · [实验二 Popular / Cold Start / ItemCF](docs/experiment2-recommendation.md)。本小组仓库已按提交要求设置为公开，便于教师直接查看代码与每次提交。
 
+扩展实验记录：[S1 RRF 多算法融合与 S3 Kafka 行为反馈](EXTENSIONS-S1-S3.md)，含实现方法、启动步骤及四张真实运行截图。
+
 发行文件校验：根目录Verify-Package.ps1及PACKAGE-CHECKSUMS.json。完整操作与安全停止条件见详细指南。
