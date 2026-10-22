@@ -41,4 +41,12 @@ class PopularProvider:
     def recommend(self, request: RecommendationRequest) -> RecommendationResult:
         require(request.runtime_mode == "business", "热门模型仅用于业务模式", "DATA_MODE_INVALID")
         ranking = load_ranking(str(self.model_manifest_path.parent / "model.json"), MODEL_VERSION)
+        if request.subject_kind == "app":
+            # Keep the historical-user demo as a global chart. For a signed-in
+            # account, skip films the person has already rated or favorited.
+            from recommender.business import read_history
+
+            history = read_history(request)
+            seen = {entry.movie_id for entry in history.ratings} | set(history.favorite_movie_ids)
+            ranking = [row for row in ranking if row[0] not in seen]
         return ranked_result(request, Algorithm.popular, MODEL_VERSION, ranking, "rating_count_and_mean")

@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   subjectKey?: string
   emptySubject?: string
 }>(), { emptySubject: '登录后体验', subjectKey: '' })
+const emit = defineEmits<{ refresh: [] }>()
 const loading = ref(false), error = ref<unknown>(null), unavailable = ref(false)
 const result = ref<AlgorithmResult | null>(null)
 const films = ref<Record<string, Movie>>({})
@@ -52,12 +53,16 @@ async function load() {
     else error.value = e
   } finally { if (seq === run) loading.value = false }
 }
+function refresh() {
+  emit('refresh')
+  void load()
+}
 watch(() => props.endpoint, load, { immediate: true })
 </script>
 
 <template>
   <section class="algorithm-panel" :aria-label="label">
-    <div class="section-top"><h3>{{ label }}</h3><span class="small-label">LIVE RECOMMENDATION</span></div>
+    <div class="section-top"><h3>{{ label }}</h3><div class="result-actions"><span class="small-label">LIVE RECOMMENDATION</span><el-button :disabled="!endpoint || loading" @click="refresh">重新生成</el-button></div></div>
     <StatePanel :loading="loading" :error="error" @retry="load">
       <div v-if="!endpoint || unavailable" class="algorithm-empty" role="status">
         <div class="algorithm-symbol"><el-icon aria-hidden="true"><Connection /></el-icon></div>
@@ -81,13 +86,14 @@ watch(() => props.endpoint, load, { immediate: true })
             </div>
           </li>
         </ol>
-        <p class="result-footnote">依据 {{ resultMethod }} 排序；推荐结果由真实数据计算，电影资料来自课程目录。</p>
+        <p class="result-footnote">依据 {{ resultMethod }} 排序；推荐结果由真实数据计算，电影资料来自课程目录。评分或收藏后可点“重新生成”查看最新结果。</p>
       </div>
     </StatePanel>
   </section>
 </template>
 
 <style scoped>
+.result-actions { display: flex; align-items: center; gap: 12px; }
 .content-results { padding: 20px; }
 .result-hero { display: flex; justify-content: space-between; align-items: end; gap: 20px; padding: 20px 24px; margin-bottom: 18px; border-radius: 10px; background: linear-gradient(120deg, #29443e, #1b2c2c); border: 1px solid #d6b4764a; }
 .result-eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .18em; font-weight: 700; }

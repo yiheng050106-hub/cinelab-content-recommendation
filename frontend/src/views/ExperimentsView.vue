@@ -40,14 +40,51 @@ const algorithmLabels: Record<string, string> = {
   itemcf: 'ItemCF · 物品协同过滤', cold_start: 'Cold Start · 零行为推荐',
   als: 'ALS · 矩阵分解',
 }
-const algorithmExplanation = computed(() => ({
-  popular: '根据真实历史评分数量和平均分计算热门榜单。',
-  content: '根据电影类型与该用户的历史偏好计算推荐。',
-  itemcf: '根据共同获得高评分的电影计算相似物品，再结合该用户的评分历史。',
-  cold_start: interestGenre.value
-    ? `针对零行为账号，按 ${interestGenre.value} 兴趣筛选真实热门电影。清除兴趣即可对比原始榜单。`
-    : '针对零评分、零收藏的新账号，回退到真实数据训练的热门榜单。',
-}[algorithm.value] || '选择算法查看实时推荐结果。'))
+const algorithmRules = computed(() => {
+  switch (algorithm.value) {
+    case 'popular': return {
+      summary: '大家都在看的高口碑电影，来自真实历史评分。',
+      steps: [
+        '统计每部电影收到多少次评分，以及这些评分的平均分。',
+        '综合口碑和评分人数排序：少数人打满分的电影不会轻易盖过大量人认可的电影。',
+        source.value === 'app' ? '为当前账号跳过已经评分或收藏的电影，取前 10 部。' : '展示全站热门前 10 部，历史用户的个人喜好不改变这张榜单。',
+      ],
+      note: '这是热门榜；分数表示综合热度，不是预测你会打几分。',
+    }
+    case 'content': return {
+      summary: '根据你喜欢的电影类型，寻找口味接近的其他电影。',
+      steps: [
+        '查看该用户过去评分和收藏的电影都属于哪些类型。',
+        '高于 3 分的电影会增强相应类型偏好；低分会弱化偏好，未评分的收藏提供较轻的偏好信号。',
+        '比较候选电影与这些类型偏好的接近程度，跳过已评分和已收藏的电影，选出前 10 部。',
+      ],
+      note: '例如喜欢喜剧，不代表只推荐喜剧；兼有相近类型的电影也可能入选。',
+    }
+    case 'itemcf': return {
+      summary: '喜欢同一部电影的人，还共同喜欢哪些电影？',
+      steps: [
+        '从历史评分中找出经常被同一批人打高分的电影，建立电影之间的相似关系。',
+        '用当前用户高于 3 分的电影寻找相似电影；评分越高，影响越大。未评分的收藏也会提供较轻的信号。',
+        '累加相似度，排除当前用户已评分或已收藏的电影，再显示前 10 部。',
+      ],
+      note: '续集是另一部电影，例如《Toy Story》和《Toy Story 2》的电影 ID 不同；只有同一电影 ID 才算重复。',
+    }
+    case 'cold_start': return {
+      summary: '新用户还没有观影记录，先从可靠的热门电影开始。',
+      steps: [
+        '只接受已注册且评分数、收藏数都为 0 的账号。',
+        '没有个人偏好时，使用真实历史评分形成的热门排序。',
+        interestGenre.value ? `已选择 ${interestGenre.value}：只保留该类型的电影，再取前 10 部。` : '未选择兴趣类型：直接展示热门前 10 部；也可选择兴趣类型试试。',
+      ],
+      note: '账号一旦评分或收藏，便不再符合零行为条件，可改用 Content 或 ItemCF。',
+    }
+    default: return {
+      summary: '此算法尚未接入，当前没有真实推荐结果。',
+      steps: ['请选择已接入的 Popular、Content、Cold Start 或 ItemCF。'],
+      note: '页面不会展示模拟推荐列表。',
+    }
+  }
+})
 
 function selectAlgorithm() {
   if (algorithm.value === 'cold_start') source.value = 'app'
@@ -125,7 +162,7 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
     </div>
     <div class="lab-notice">
       <span class="status-pill">实时结果</span>
-      <p>{{ algorithmExplanation }} 历史用户只读，推荐列表由当前算法实时生成。</p>
+      <p>{{ algorithmRules.summary }} 已接入算法的结果由真实数据生成。</p>
     </div>
     <div class="lab-layout">
       <aside class="lab-controls">
@@ -186,8 +223,14 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
         </div>
       </aside>
       <div class="lab-results">
+        <section class="algorithm-guide" :aria-label="`${algorithmLabels[algorithm] || algorithm} 的推荐规则`">
+          <div class="section-top"><h2>这套算法怎么推荐</h2><span class="status-pill">{{ algorithmLabels[algorithm] || algorithm }}</span></div>
+          <p class="guide-summary">{{ algorithmRules.summary }}</p>
+          <ol><li v-for="step in algorithmRules.steps" :key="step">{{ step }}</li></ol>
+          <p class="guide-note">{{ algorithmRules.note }}</p>
+        </section>
         <AlgorithmPanel :label="`${algorithmLabels[algorithm] || algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
-          :empty-subject="source === 'ml' ? '请选择历史用户' : '登录后体验'" />
+          :empty-subject="source === 'ml' ? '请选择历史用户' : '登录后体验'" @refresh="fetchAppActivity" />
         <section v-if="source === 'ml'" class="history-panel">
           <div class="section-top"><h2>历史评分</h2><span class="status-pill">{{ subject || '未选择用户' }} · 只读</span></div>
           <StatePanel :loading="ratings.loading.value" :error="ratings.error.value"
@@ -215,6 +258,13 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
 </template>
 
 <style scoped>
+.algorithm-guide { padding: 20px 24px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.algorithm-guide .section-top { align-items: center; }
+.algorithm-guide .section-top h2 { font-size: 18px; }
+.guide-summary { margin: 12px 0; font-weight: 650; }
+.algorithm-guide ol { margin: 0; padding-left: 22px; color: var(--muted); line-height: 1.7; }
+.algorithm-guide li + li { margin-top: 5px; }
+.guide-note { margin: 12px 0 0; padding: 9px 12px; border-left: 3px solid var(--accent); background: var(--bg); color: var(--muted); font-size: 12px; }
 .direct-user-input { display: flex; gap: 8px; }
 .direct-user-input .el-input { min-width: 0; }
 .direct-user-input .el-button { flex: 0 0 auto; }
