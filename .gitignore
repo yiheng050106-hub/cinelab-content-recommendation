@@ -26,6 +26,8 @@ id_rsa*
 id_ed25519*
 *.log
 *.log.*
+*.pid
+docs/evidence/*-full.jpg
 /reports/
 # Databases, generated models and dependency/build caches.
 **/mysql_data/

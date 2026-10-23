@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     db_socket: str | None = None
     db_ssl_ca: str | None = None
     kafka_bootstrap_servers: str = ""
+    llm_key_file: str = ""
+    llm_model: str = "nvidia/nemotron-3.5-lightning:free"
+    llm_endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
     manifest_path: Path = ROOT / "data/packages" / DATASET / "manifest.json"
 
     @model_validator(mode="after")

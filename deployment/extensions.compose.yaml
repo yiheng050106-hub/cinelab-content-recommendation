@@ -28,8 +28,16 @@ services:
   api:
     environment:
       APP_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      APP_LLM_KEY_FILE: /run/secrets/openrouter_key
+      APP_LLM_MODEL: nvidia/nemotron-3.5-lightning:free
+      APP_LLM_ENDPOINT: http://host.docker.internal:18765/api/v1/chat/completions
+    secrets: [app_password, jwt_secret, openrouter_key]
     depends_on:
       kafka: {condition: service_healthy}
 
 volumes:
   kafka_data:
+
+secrets:
+  openrouter_key:
+    file: ./deployment/openrouter.key

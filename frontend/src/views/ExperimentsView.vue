@@ -8,6 +8,7 @@ import type { Algorithm, HistoryUser, Movie, Page } from '../types'
 import StatePanel from '../components/StatePanel.vue'
 import PageNav from '../components/PageNav.vue'
 import AlgorithmPanel from '../components/AlgorithmPanel.vue'
+import LLMExtensions from '../components/LLMExtensions.vue'
 
 const route = useRoute(), router = useRouter(), auth = useAuth()
 const capture = computed(() => route.query.capture === 'rrf' || route.query.capture === 'feedback' ? route.query.capture : '')
@@ -290,6 +291,7 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
         </section>
         <AlgorithmPanel v-if="capture !== 'feedback'" :label="`${algorithmLabels[algorithm] || algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
           :empty-subject="source === 'ml' ? '请选择历史用户' : '登录后体验'" @refresh="fetchAppActivity" />
+        <LLMExtensions v-if="!capture" :source="source" :user-id="selected" :algorithm="algorithm" />
         <section v-if="source === 'app' && capture !== 'rrf'" class="feedback-panel">
           <div class="section-top"><h2>S3 · Kafka 行为反馈</h2><el-button :disabled="feedbackPending" @click="fetchFeedback">刷新消费状态</el-button></div>
           <p>当前账号 {{ auth.account?.login_name || '未登录' }} · 评分或收藏真实电影后，事件进入 Kafka，消费者按电影类型更新兴趣权重。</p>
