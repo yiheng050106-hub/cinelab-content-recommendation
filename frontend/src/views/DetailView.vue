@@ -13,6 +13,7 @@ const route = useRoute(), router = useRouter(), auth = useAuth()
 const { data: movie, error, loading, load } = useRemote<Movie>()
 const score = ref<number | undefined>(), savedScore = ref<string | null>(null), favorited = ref(false)
 const activityLoading = ref(false), activityError = ref<unknown>(null), saving = ref(false)
+const behaviorChanged = ref(false)
 let activityRun = 0
 const id = computed(() => String(route.params.id))
 function fetchMovie() { return load(async () => (await http.get<Movie>(`/movies/${encodeURIComponent(id.value)}`)).data) }
@@ -40,24 +41,24 @@ async function fetchActivity() {
 async function rate() {
   if (score.value === undefined) return
   saving.value = true; activityError.value = null
-  try { const result = (await http.put<{rating:string}>(`/me/ratings/${id.value}`, { rating: score.value })).data; savedScore.value = result.rating; ElMessage.success('评分已保存') }
+  try { const result = (await http.put<{rating:string}>(`/me/ratings/${id.value}`, { rating: score.value })).data; savedScore.value = result.rating; behaviorChanged.value = true; ElMessage.success('评分已保存') }
   catch (e) { activityError.value = e; ElMessage.error(errorMessage(e)) }
   finally { saving.value = false }
 }
 async function toggleFavorite() {
   saving.value = true; activityError.value = null
-  try { if (favorited.value) await http.delete(`/me/favorites/${id.value}`); else await http.put(`/me/favorites/${id.value}`); favorited.value = !favorited.value; ElMessage.success(favorited.value ? '已加入收藏' : '已取消收藏') }
+  try { if (favorited.value) await http.delete(`/me/favorites/${id.value}`); else await http.put(`/me/favorites/${id.value}`); favorited.value = !favorited.value; behaviorChanged.value = true; ElMessage.success(favorited.value ? '已加入收藏' : '已取消收藏') }
   catch (e) { activityError.value = e; ElMessage.error(errorMessage(e)) }
   finally { saving.value = false }
 }
-watch(id, async () => { await fetchMovie(); await fetchActivity() }, { immediate: true })
+watch(id, async () => { behaviorChanged.value = false; await fetchMovie(); await fetchActivity() }, { immediate: true })
 watch(() => auth.account?.account_id, fetchActivity)
 </script>
 <template>
   <div class="page detail-page"><RouterLink to="/movies" class="back-link"><el-icon aria-hidden="true"><Back /></el-icon> 返回电影库</RouterLink>
     <StatePanel :loading="loading" :error="error" @retry="retryMovie"><div v-if="movie" class="detail-layout"><aside><MoviePoster :path="movie.poster_path" :title="movie.movielens_title" /><p class="archive-id">MOVIELENS / #{{ movie.movie_id }}</p></aside><div class="detail-content"><p class="eyebrow">FILM DOSSIER</p><h1>{{ movie.title_zh || movie.movielens_title }}</h1><p v-if="movie.title_zh" class="original-title">{{ movie.movielens_title }}</p><div class="genre-tags"><el-tag v-for="g in movie.genres" :key="g" effect="plain">{{ g }}</el-tag></div><dl class="film-facts"><div><dt>上映年份</dt><dd>{{ movie.release_year || '暂未收录' }}</dd></div><div><dt>上映日期</dt><dd>{{ movie.release_date || '暂未收录' }}</dd></div><div><dt>片长</dt><dd>{{ movie.runtime_minutes ? `${movie.runtime_minutes} 分钟` : '暂未收录' }}</dd></div><div><dt>原始语言</dt><dd>{{ movie.original_language || '暂未收录' }}</dd></div><div class="wide"><dt>导演</dt><dd>{{ people(movie.directors) }}</dd></div><div class="wide"><dt>主要演员</dt><dd>{{ people(movie.cast_top10) }}</dd></div></dl><section class="synopsis"><h2>关于这部电影</h2><p>{{ movie.overview || '剧情简介暂未收录。你仍然可以为这部电影评分或加入收藏。' }}</p></section>
       <section class="rating-panel" aria-label="我的电影记录"><div class="section-top"><h2>留下你的观影印记</h2><span class="status-pill">{{ auth.account ? auth.account.subject_key : '尚未登录' }}</span></div>
-        <template v-if="auth.account"><StatePanel :loading="activityLoading" :error="activityError" @retry="fetchActivity"><form @submit.prevent="rate"><label for="rating-input">我的评分 <strong>{{ savedScore || '尚未评分' }}</strong></label><div class="rating-controls"><el-input-number id="rating-input" v-model="score" :min="0.5" :max="5" :step="0.5" :precision="1" step-strictly :disabled="saving" placeholder="请选择" /><el-button type="primary" native-type="submit" :disabled="score === undefined || saving" :loading="saving">{{ savedScore ? '修改评分' : '保存评分' }}</el-button><el-button :icon="Star" :disabled="saving" :aria-pressed="favorited" @click="toggleFavorite">{{ favorited ? '取消收藏' : '收藏电影' }}</el-button></div><p class="form-hint">0.5—5.0 分，半星步长。评分只属于当前注册账号。</p></form></StatePanel></template>
+        <template v-if="auth.account"><StatePanel :loading="activityLoading" :error="activityError" @retry="fetchActivity"><form @submit.prevent="rate"><label for="rating-input">我的评分 <strong>{{ savedScore || '尚未评分' }}</strong></label><div class="rating-controls"><el-input-number id="rating-input" v-model="score" :min="0.5" :max="5" :step="0.5" :precision="1" step-strictly :disabled="saving" placeholder="请选择" /><el-button type="primary" native-type="submit" :disabled="score === undefined || saving" :loading="saving">{{ savedScore ? '修改评分' : '保存评分' }}</el-button><el-button :icon="Star" :disabled="saving" :aria-pressed="favorited" @click="toggleFavorite">{{ favorited ? '取消收藏' : '收藏电影' }}</el-button></div><p class="form-hint">0.5—5.0 分，半星步长。评分只属于当前注册账号。</p><RouterLink v-if="behaviorChanged" to="/#home-recommendations" class="text-link">行为已保存，查看重新计算的首页推荐 →</RouterLink></form></StatePanel></template>
         <div v-else class="inline-empty"><p>登录后记录评分，收藏想看的电影。</p><el-button type="primary" @click="router.push({path:'/login',query:{redirect:route.fullPath}})">登录后记录</el-button></div>
       </section>
     </div></div></StatePanel>

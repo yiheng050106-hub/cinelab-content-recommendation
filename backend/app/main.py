@@ -18,6 +18,7 @@ from .activity import router as activity_router
 from .experiments import router as experiments_router
 from .feedback_stream import FeedbackStream
 from .llm_extensions import router as llm_router
+from .home import router as home_router
 
 log = logging.getLogger("course_api")
 
@@ -111,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1", dependencies=[Depends(ready_dependency)])
     app.include_router(catalog_router, prefix="/api/v1", dependencies=[Depends(ready_dependency)])
     app.include_router(activity_router, prefix="/api/v1", dependencies=[Depends(ready_dependency)])
+    app.include_router(home_router, prefix="/api/v1", dependencies=[Depends(ready_dependency)])
     app.include_router(experiments_router, prefix="/api/v1", dependencies=[Depends(ready_dependency)])
     app.include_router(llm_router, prefix="/api/v1", dependencies=[Depends(ready_dependency)])
     return app

@@ -32,6 +32,7 @@ type FeedbackSnapshot = { status: string; topic: string; account_id: string; pro
   recent_events: FeedbackEvent[] }
 const feedback = ref<FeedbackSnapshot | null>(null), feedbackError = ref<unknown>(null)
 const feedbackPending = ref(false), feedbackAction = ref(''), feedbackMovieId = ref('1'), feedbackRating = ref(5)
+const recommendationRevision = ref(0)
 const feedbackMovieValid = computed(() => /^[1-9][0-9]*$/.test(feedbackMovieId.value.trim()))
 type MetricRow = { algorithm: string; model_version: string; precision_at_10: number; recall_at_10: number }
 type EvaluationReport = { status: string; partition: string; user_count: number; positive_threshold: number;
@@ -159,6 +160,7 @@ async function sendFeedback(action: 'rating' | 'favorite' | 'remove') {
       if (!delivery?.event_id || feedback.value?.recent_events.some(event => event.event_id === delivery.event_id)) break
     }
     await fetchAppActivity()
+    recommendationRevision.value++
   } catch (error) { feedbackAction.value = error instanceof ApiError ? error.message : '行为提交失败' }
   finally { feedbackPending.value = false }
 }
@@ -289,10 +291,10 @@ void fetchUsers(); void fetchRegistry(); void fetchEvaluation(); void fetchRatin
           <ol><li v-for="step in algorithmRules.steps" :key="step">{{ step }}</li></ol>
           <p class="guide-note">{{ algorithmRules.note }}</p>
         </section>
-        <AlgorithmPanel v-if="capture !== 'feedback'" :label="`${algorithmLabels[algorithm] || algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
+        <AlgorithmPanel v-if="capture !== 'feedback'" :key="`${endpoint}-${recommendationRevision}`" :label="`${algorithmLabels[algorithm] || algorithm} · 推荐结果`" :endpoint="endpoint" :subject-key="subject"
           :empty-subject="source === 'ml' ? '请选择历史用户' : '登录后体验'" @refresh="fetchAppActivity" />
-        <LLMExtensions v-if="!capture" :source="source" :user-id="selected" :algorithm="algorithm" />
-        <section v-if="source === 'app' && capture !== 'rrf'" class="feedback-panel">
+        <LLMExtensions v-if="!capture" :source="source" :user-id="source === 'app' ? auth.account?.account_id || '' : selected" :subject-label="source === 'app' ? auth.account?.login_name : undefined" :algorithm="algorithm" />
+        <section v-if="source === 'app' && capture !== 'rrf'" id="kafka-feedback" class="feedback-panel">
           <div class="section-top"><h2>S3 · Kafka 行为反馈</h2><el-button :disabled="feedbackPending" @click="fetchFeedback">刷新消费状态</el-button></div>
           <p>当前账号 {{ auth.account?.login_name || '未登录' }} · 评分或收藏真实电影后，事件进入 Kafka，消费者按电影类型更新兴趣权重。</p>
           <div v-if="auth.account" class="feedback-form">

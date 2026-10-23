@@ -13,7 +13,7 @@ const router = createRouter({
     { path: '/experiments', component: () => import('./views/ExperimentsView.vue'), meta: { title: '推荐实验室' } },
     { path: '/:pathMatch(.*)*', component: () => import('./views/NotFoundView.vue'), meta: { title: '页面未找到' } },
   ],
-  scrollBehavior(to, from, saved) { return saved || (to.path === from.path ? undefined : { top: 0 }) },
+  scrollBehavior(to, from, saved) { return saved || (to.hash ? { el: to.hash, top: 90 } : to.path === from.path ? undefined : { top: 0 }) },
 })
 export function safeRedirect(value: unknown): string {
   return typeof value === 'string' && /^\/(?:movies(?:\/\d+)?|profile|experiments)(?:\?|$)/.test(value) ? value : '/profile'

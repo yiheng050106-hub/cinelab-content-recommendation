@@ -19,6 +19,7 @@ from .catalog import get_genres, public_row
 from .errors import APIError
 from .experiments import invoke
 from .schemas import Input
+from .security import ActorDependency
 
 router = APIRouter(prefix="/experiments/llm", tags=["大模型扩展"])
 
@@ -29,6 +30,11 @@ class SearchInput(Input):
 
 class ExplainInput(Input):
     ml_user_id: int = Field(ge=1, le=5000)
+    algorithm: Algorithm
+    movie_id: int | None = Field(default=None, ge=1)
+
+
+class ExplainMeInput(Input):
     algorithm: Algorithm
     movie_id: int | None = Field(default=None, ge=1)
 
@@ -117,32 +123,55 @@ def natural_search(body: SearchInput, request: Request):
 
 @router.post("/explain")
 def explain_recommendation(body: ExplainInput, request: Request):
-    if body.algorithm not in {Algorithm.content, Algorithm.itemcf, Algorithm.als, Algorithm.rrf}:
-        raise APIError(422, "EXPLANATION_ALGORITHM_INVALID", "请选择 Content、ItemCF、ALS 或 RRF")
     with request.app.state.db.connection() as conn:
         found = conn.execute(text("SELECT 1 FROM history_users WHERE ml_user_id=:uid"),
                              {"uid": body.ml_user_id}).first()
     if not found:
         raise APIError(404, "HISTORY_USER_NOT_FOUND", "历史用户不存在")
-    result = invoke(body.algorithm, "ml", body.ml_user_id, 10)
-    item = next((i for i in result.items if body.movie_id is None or int(i.movie_id) == body.movie_id), None)
+    return _explain(request, "ml", body.ml_user_id, body.algorithm, body.movie_id)
+
+
+@router.post("/explain-me")
+def explain_my_recommendation(body: ExplainMeInput, request: Request, actor: ActorDependency):
+    return _explain(request, "app", actor.account_id, body.algorithm, body.movie_id)
+
+
+def _explain(request: Request, kind: str, uid: int, algorithm: Algorithm, movie_id: int | None):
+    if algorithm not in {Algorithm.content, Algorithm.itemcf, Algorithm.als, Algorithm.rrf}:
+        raise APIError(422, "EXPLANATION_ALGORITHM_INVALID", "请选择 Content、ItemCF、ALS 或 RRF")
+    result = invoke(algorithm, kind, uid, 10)
+    item = next((i for i in result.items if movie_id is None or int(i.movie_id) == movie_id), None)
     if item is None:
         raise APIError(422, "MOVIE_NOT_RECOMMENDED", "该电影不在当前用户的这份 Top-10 推荐中")
     with request.app.state.db.connection() as conn:
         target = conn.execute(text("SELECT movie_id,movielens_title,title_zh,genres,release_year "
                                    "FROM movies WHERE movie_id=:mid"), {"mid": int(item.movie_id)}).mappings().one()
-        liked = conn.execute(text("SELECT r.movie_id,r.rating,m.movielens_title,m.genres "
-                                  "FROM history_ratings r JOIN movies m ON m.movie_id=r.movie_id "
-                                  "WHERE r.ml_user_id=:uid AND r.rating>=4 "
-                                  "ORDER BY r.rating DESC,r.timestamp_utc DESC,r.movie_id LIMIT 6"),
-                             {"uid": body.ml_user_id}).mappings().all()
-    evidence = {"user_id": "ml" + str(body.ml_user_id), "algorithm": body.algorithm.value,
+        if kind == "ml":
+            liked = conn.execute(text("SELECT r.movie_id,r.rating,m.movielens_title,m.genres,0 AS favorited "
+                                      "FROM history_ratings r JOIN movies m ON m.movie_id=r.movie_id "
+                                      "WHERE r.ml_user_id=:uid AND r.rating>=4 "
+                                      "ORDER BY r.rating DESC,r.timestamp_utc DESC,r.movie_id LIMIT 6"),
+                                 {"uid": uid}).mappings().all()
+        else:
+            rated = conn.execute(text("SELECT r.movie_id,r.rating,m.movielens_title,m.genres,0 AS favorited "
+                                      "FROM account_ratings r JOIN movies m ON m.movie_id=r.movie_id "
+                                      "WHERE r.account_id=:uid AND r.rating>=4 "
+                                      "ORDER BY r.rating DESC,r.updated_at DESC,r.movie_id LIMIT 6"),
+                                 {"uid": uid}).mappings().all()
+            favorites = conn.execute(text("SELECT f.movie_id,NULL AS rating,m.movielens_title,m.genres,1 AS favorited "
+                                          "FROM account_favorites f JOIN movies m ON m.movie_id=f.movie_id "
+                                          "WHERE f.account_id=:uid AND NOT EXISTS "
+                                          "(SELECT 1 FROM account_ratings r WHERE r.account_id=f.account_id "
+                                          "AND r.movie_id=f.movie_id) ORDER BY f.created_at DESC LIMIT 6"),
+                                     {"uid": uid}).mappings().all()
+            liked = (list(rated) + list(favorites))[:6]
+    evidence = {"user_id": kind + str(uid), "algorithm": algorithm.value,
                 "recommendation": {"rank": item.rank, "score": item.score,
                     "recall_sources": item.recall_sources, "recall_ranks": item.recall_ranks,
                     "movie": public_row(target)},
                 "liked_history": [public_row(row) for row in liked]}
     if not evidence["liked_history"]:
-        raise APIError(422, "HISTORY_TOO_SPARSE", "该用户没有可用于解释的高分历史")
+        raise APIError(422, "HISTORY_TOO_SPARSE", "该用户没有可用于解释的高分评分或收藏")
     # Ask the model to choose evidence, then render only verified database facts.
     # Free models can otherwise invent a translated film title or plot detail.
     candidate_ids = {int(movie["movie_id"]): movie for movie in evidence["liked_history"]}
@@ -151,7 +180,7 @@ def explain_recommendation(body: ExplainInput, request: Request):
     for attempt in range(2):
         raw, model = _complete(request,
             "你是电影推荐证据选择器。只输出一个 JSON 对象："
-            '{"history_movie_id":整数}。必须从 liked_history 选一部最能解释推荐电影的高分历史电影。'
+            '{"history_movie_id":整数}。必须从 liked_history 选一部最能解释推荐电影的高分评分或收藏电影。'
             "优先选与推荐电影共享类型的电影。不得输出电影名、解释文字或其他字段。",
             json.dumps({"evidence": evidence, "attempt": attempt + 1}, ensure_ascii=False))
         match = re.search(r"\{.*?\}", raw, re.S)
@@ -167,9 +196,11 @@ def explain_recommendation(body: ExplainInput, request: Request):
     target_genres = set(evidence["recommendation"]["movie"]["genres"])
     shared = sorted(target_genres.intersection(choice["genres"]))
     title = evidence["recommendation"]["movie"]["movielens_title"]
-    explanation = (f'你曾给《{choice["movielens_title"]}》打 {choice["rating"]} 分。'
+    history_label = (f'你曾给《{choice["movielens_title"]}》打 {choice["rating"]} 分。'
+                     if choice["rating"] is not None else f'你收藏了《{choice["movielens_title"]}》。')
+    explanation = (history_label
                    + (f'它与《{title}》同属 {"、".join(shared)} 类型。' if shared else
-                      f'《{title}》与你的历史评分共同参与个性化排序。')
-                   + f'{body.algorithm.value.upper()} 根据你的历史评分生成候选，将这部电影排在第 {item.rank} 名。')
+                      f'《{title}》与你的历史行为共同参与个性化排序。')
+                   + f'{algorithm.value.upper()} 根据你的评分和收藏生成候选，将这部电影排在第 {item.rank} 名。')
     return {"status": "ready", "model": model, "explanation": explanation,
             "evidence": evidence}

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import http, { errorMessage } from '../api'
 
-const props = defineProps<{ source: string; userId: string; algorithm: string }>()
+const props = defineProps<{ source: string; userId: string; algorithm: string; subjectLabel?: string }>()
 type SearchMovie = { movie_id: string; movielens_title: string; title_zh: string | null;
   genres: string[]; rating_count: number }
 type SearchResult = { model: string; input: string; intent: { genre: string | null; keyword: string | null };
@@ -11,14 +11,14 @@ type Evidence = { user_id: string; algorithm: string;
   recommendation: { rank: number; score: number | null; recall_sources: string[] | null;
     recall_ranks: Record<string, number> | null;
     movie: { movie_id: string; movielens_title: string; title_zh: string | null; genres: string[] } };
-  liked_history: { movie_id: string; rating: number; movielens_title: string; genres: string[] }[] }
+  liked_history: { movie_id: string; rating: number | null; favorited: boolean; movielens_title: string; genres: string[] }[] }
 type ExplainResult = { model: string; explanation: string; evidence: Evidence }
 
 const prompt = ref('我想看轻松有趣的喜剧电影')
 const search = ref<SearchResult | null>(null), explanation = ref<ExplainResult | null>(null)
 const searchBusy = ref(false), explainBusy = ref(false)
 const searchError = ref(''), explainError = ref('')
-const canExplain = computed(() => props.source === 'ml' && /^[1-9][0-9]*$/.test(props.userId) &&
+const canExplain = computed(() => ['ml', 'app'].includes(props.source) && /^[1-9][0-9]*$/.test(props.userId) &&
   ['content', 'itemcf', 'als', 'rrf'].includes(props.algorithm))
 
 async function runSearch() {
@@ -34,8 +34,10 @@ async function runExplain() {
   if (!canExplain.value) return
   explainBusy.value = true; explanation.value = null; explainError.value = ''
   try {
-    explanation.value = (await http.post<ExplainResult>('/experiments/llm/explain',
-      { ml_user_id: Number(props.userId), algorithm: props.algorithm }, { timeout: 65000 })).data
+    explanation.value = (await http.post<ExplainResult>(props.source === 'app'
+      ? '/experiments/llm/explain-me' : '/experiments/llm/explain',
+      props.source === 'app' ? { algorithm: props.algorithm }
+        : { ml_user_id: Number(props.userId), algorithm: props.algorithm }, { timeout: 65000 })).data
   } catch (error) { explainError.value = errorMessage(error) }
   finally { explainBusy.value = false }
 }
@@ -43,7 +45,7 @@ watch(() => [props.source, props.userId, props.algorithm], () => { explanation.v
 </script>
 
 <template>
-  <section class="llm-panel" aria-label="大模型推荐扩展">
+  <section id="llm-extensions" class="llm-panel" aria-label="大模型推荐扩展">
     <div class="section-top"><h2>大模型推荐扩展</h2><span class="status-pill">真实电影数据 · 免费模型</span></div>
     <div class="llm-columns">
       <div class="llm-feature">
@@ -60,14 +62,14 @@ watch(() => [props.source, props.userId, props.algorithm], () => { explanation.v
       </div>
       <div class="llm-feature">
         <h3>S4 · 可核验的推荐理由</h3>
-        <p>选择历史用户和 Content、ItemCF、ALS 或 RRF。模型只根据该用户高分历史与真实 Top-1 推荐证据解释。</p>
-        <p class="llm-conditions">当前条件：<strong>{{ source === 'ml' && userId ? `ml${userId}` : '请选择历史用户' }}</strong> · <strong>{{ algorithm.toUpperCase() }}</strong></p>
+        <p>选择当前账号或历史用户的 Content、ItemCF、ALS 或 RRF。模型从真实高分评分与收藏中选取可核验的 Top-1 推荐证据。</p>
+        <p class="llm-conditions">当前条件：<strong>{{ subjectLabel || (userId ? `${source}${userId}` : '请先登录或选择历史用户') }}</strong> · <strong>{{ algorithm.toUpperCase() }}</strong></p>
         <el-button type="primary" :loading="explainBusy" :disabled="!canExplain" @click="runExplain">生成 Top-1 推荐理由</el-button>
         <p v-if="explainError" class="llm-error" role="alert">{{ explainError }}</p>
         <div v-if="explanation" class="llm-result" aria-label="个性化推荐解释结果">
           <p><strong>{{ explanation.evidence.recommendation.movie.title_zh || explanation.evidence.recommendation.movie.movielens_title }}</strong> · #{{ explanation.evidence.recommendation.movie.movie_id }} · 推荐第 {{ explanation.evidence.recommendation.rank }} 名</p>
           <p class="llm-explanation">{{ explanation.explanation }}</p>
-          <p><strong>可核验历史：</strong><span v-for="(movie, index) in explanation.evidence.liked_history" :key="movie.movie_id">{{ index ? '；' : '' }}{{ movie.movielens_title }}（{{ movie.rating }} 分）</span></p>
+          <p><strong>可核验历史：</strong><span v-for="(movie, index) in explanation.evidence.liked_history" :key="movie.movie_id">{{ index ? '；' : '' }}{{ movie.movielens_title }}（{{ movie.rating === null ? '已收藏' : `${movie.rating} 分` }}）</span></p>
           <p v-if="explanation.evidence.recommendation.recall_ranks"><strong>算法来源：</strong><span v-for="(rank, source) in explanation.evidence.recommendation.recall_ranks" :key="source">{{ source }} #{{ rank }}　</span></p>
           <small>模型 {{ explanation.model }} · 电影、评分和排名来自 CineLab 实际数据</small>
         </div>
