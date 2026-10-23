@@ -20,16 +20,17 @@
 
 ## 提交截图
 
-以下图片均截自本机真实运行的 CineLab 浏览器页面，保留了账号、输入条件及结果。可直接选择前五张按学习通要求提交，其余可用于说明其他扩展功能。
+以下图片均截自本机真实运行的 CineLab 浏览器页面，保留了账号、输入条件及结果。前五张对应学习通要求，其余可用于核对行为和其他扩展功能。
 
-1. [新增行为前：首页 Cold Start Top-10](evidence/integration-home-before.jpg)
-2. [在电影详情页新增 5 分评分](evidence/integration-rating-action.jpg)
+1. [当前登录账号：首页 Content Top-10](evidence/integration-home-current.jpg)
+2. [同一账号新增行为前：首页 Cold Start Top-10](evidence/integration-home-before.jpg)
 3. [新增行为后：首页 Content Top-10 与行为依据](evidence/integration-home-after.jpg)
 4. [S1 RRF：入口、当前账号、融合来源与 Top-10](evidence/integration-s1-rrf.jpg)
 5. [S3 Kafka：入口、真实评分事件与消费者兴趣](evidence/integration-s3-kafka.jpg)
-6. [S2：自然语言输入及真实电影搜索结果](evidence/integration-s2-home.jpg)
-7. [S4：当前账号评分与 Top-1 可核验推荐理由](evidence/integration-s4-home.jpg)
-8. [个人中心：同一账号的评分记录与首页推荐入口](evidence/integration-profile.jpg)
+6. [在电影详情页新增 5 分评分](evidence/integration-rating-action.jpg)
+7. [S2：自然语言输入及真实电影搜索结果](evidence/integration-s2-home.jpg)
+8. [S4：当前账号评分与 Top-1 可核验推荐理由](evidence/integration-s4-home.jpg)
+9. [个人中心：同一账号的评分记录与首页推荐入口](evidence/integration-profile.jpg)
 
 ## 演示步骤
 

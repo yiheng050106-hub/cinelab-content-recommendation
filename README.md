@@ -16,6 +16,6 @@
 
 扩展实验记录：[S1 RRF 多算法融合与 S3 Kafka 行为反馈](EXTENSIONS-S1-S3.md)，含实现方法、启动步骤及四张真实运行截图。
 
-系统集成记录：[实验五：首页个性化推荐、行为前后对比与扩展入口](docs/experiment5-system-integration.md)，含七张真实运行截图。
+系统集成记录：[实验五：首页个性化推荐、行为前后对比与扩展入口](docs/experiment5-system-integration.md)，含九张真实运行截图。
 
 发行文件校验：根目录Verify-Package.ps1及PACKAGE-CHECKSUMS.json。完整操作与安全停止条件见详细指南。
